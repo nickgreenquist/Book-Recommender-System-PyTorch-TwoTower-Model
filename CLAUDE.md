@@ -127,10 +127,11 @@ Prediction: dot_product(user_combined, item_combined)
 
 ### Author tower details
 
-- Books may have multiple authors — avg-pool their embeddings
+- **v1: primary author only** — 80.7% of corpus books have exactly one author; multi-author avg-pool is a future improvement
 - `nn.Embedding(n_authors + 1, author_embedding_size)` with padding index = `n_authors`
-- User author affinity = rating-weighted avg pool of author embeddings over read history
-- 5,856 unique authors in the 11k-book corpus
+- Author vocab index 0 = `__unknown__` (books with no author metadata)
+- User author affinity = rating-weighted avg pool of primary author embeddings over read history
+- 5,857 unique author vocab entries (including `__unknown__` at index 0) in the 11k-book corpus
 
 ### Current embedding sizes (TBD — starting point)
 
@@ -205,6 +206,10 @@ Canary users are synthetic — no real read timestamps. All receive `ts_max_bin`
 - **Better shelf-relevance scoring (TF-IDF style)** — v1 uses `shelf_count / total_shelf_count_for_book`. Generic shelves like "to-read" and "fiction" score high on nearly every book and carry little information. A better score: `(shelf_count / total_for_book) * log(total_books / books_with_this_shelf)` — suppresses common shelves, amplifies specific ones like "cozy-mystery". Requires per-shelf document frequency computed during `preprocess books`.
 
 - **Book description embeddings** — `goodreads_books.json` includes a `description` field. Encoding with a sentence transformer (e.g. `all-MiniLM-L6-v2`) would add dense semantic signal. Skipped in v1 to keep a simple baseline and avoid heavy text encoder dependency.
+
+- **Multi-author avg-pool** — v1 uses only the primary author (80.7% of books have one author). Future: avg-pool embeddings across all authors per book, using a padded `nn.Embedding` with `padding_idx`.
+
+- **Consistent label/history indexing** — `read_history` stores `book_idx` integers (pre-mapped in features.py) but `label_bookIds` stores raw string IDs (mapped in dataset.py). Mirrors the movie model pattern but could be unified in features.py for consistency.
 
 See the movie repo's CLAUDE.md "Future User Tower Improvements" and "Richer Cross-Signal Features" sections for additional ideas that apply equally here.
 

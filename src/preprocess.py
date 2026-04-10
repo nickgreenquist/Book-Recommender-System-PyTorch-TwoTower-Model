@@ -5,7 +5,7 @@ Outputs data/base_*.parquet.
 Usage:
     python main.py preprocess books         # Step 1: filter books → data/base_books.parquet
     python main.py preprocess interactions  # Step 2: stream interactions → base_interactions_raw + vocab/shelf/ts parquets
-    python main.py preprocess split         # Step 3: split raw interactions → base_ratings_watch, base_ratings_labels
+    python main.py preprocess split         # Step 3: split raw interactions → base_ratings_read, base_ratings_labels
     python main.py preprocess               # Run all steps in order
 """
 import gzip
@@ -122,7 +122,7 @@ def run_interactions(data_dir: str = 'data') -> None:
     Two-pass stream over goodreads_interactions_dedup.json.gz.
     Requires data/base_books.parquet from run_books().
     Saves base_interactions_raw, base_vocab, base_book_shelves, base_timestamps.
-    Then calls run_split() to produce base_ratings_watch, base_ratings_labels.
+    Then calls run_split() to produce base_ratings_read, base_ratings_labels.
     """
     base_books_path = os.path.join(data_dir, 'base_books.parquet')
     if not os.path.exists(base_books_path):
@@ -242,9 +242,9 @@ def run_interactions(data_dir: str = 'data') -> None:
 
 def run_split(data_dir: str = 'data') -> None:
     """
-    Split base_interactions_raw.parquet into watch/label sets.
+    Split base_interactions_raw.parquet into read/label sets.
     Requires base_interactions_raw.parquet from run_interactions().
-    Rewrites base_ratings_watch.parquet and base_ratings_labels.parquet.
+    Rewrites base_ratings_read.parquet and base_ratings_labels.parquet.
     Safe to re-run without re-streaming the gzip.
     """
     raw_path = os.path.join(data_dir, 'base_interactions_raw.parquet')
@@ -266,9 +266,9 @@ def run_split(data_dir: str = 'data') -> None:
     print("\n── Splitting user histories ──")
     read_df, labels_df = _split_user_history(df, top_books)
 
-    read_df.to_parquet(os.path.join(data_dir, 'base_ratings_watch.parquet'), index=False)
+    read_df.to_parquet(os.path.join(data_dir, 'base_ratings_read.parquet'), index=False)
     labels_df.to_parquet(os.path.join(data_dir, 'base_ratings_labels.parquet'), index=False)
-    print(f"\n✓ Wrote base_ratings_watch, base_ratings_labels  →  {data_dir}/")
+    print(f"\n✓ Wrote base_ratings_read, base_ratings_labels  →  {data_dir}/")
 
 
 # ── Vocab building ────────────────────────────────────────────────────────────
