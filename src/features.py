@@ -127,34 +127,34 @@ def build_book_features(base: dict, vocab: dict) -> pd.DataFrame:
 
 # ── Per-user features ─────────────────────────────────────────────────────────
 
-def build_user_features(base: dict, book_df: pd.DataFrame, vocab: dict) -> pd.DataFrame:
+def build_user_features(base: dict, vocab: dict) -> pd.DataFrame:
     """
     Returns DataFrame with one row per user:
       user_id, avg_rating, genre_context,
-      read_history, read_history_ratings, shelf_context,
+      read_history, read_history_ratings,
       label_bookIds, label_ratings, label_timestamps
 
-    genre_context  — float vector length 2*n_genres:
-                     first half  = debiased avg rating per genre
-                     second half = fraction of read history in each genre
-    shelf_context  — float vector length n_shelves: mean of read books' shelf vectors
-                     (pre-averaged per user; shared shelf tower applied in model)
+    genre_context — float vector length 2*n_genres:
+                    first half  = debiased avg rating per genre
+                    second half = fraction of read history in each genre
     read_history  — list[int] of book_idx values, capped to MAX_HISTORY_LEN most recent
+
+    Note: shelf_context is NOT stored per user. The model looks up shelf vectors
+    from a book_shelf_matrix using read_history indices and pools them in the
+    forward pass — avoids materializing a 525k × 3032 tensor.
     """
-    read_df  = base['read']
+    read_df   = base['read']
     labels_df = base['labels']
     books_df  = base['books']
 
     genre_to_i = vocab['genre_to_i']
     genres_ord = vocab['genres_ordered']
     n_genres   = len(genre_to_i)
-    n_shelves  = len(vocab['shelf_to_i'])
 
     top_books   = books_df['book_id'].tolist()
     book_to_idx = {bid: i for i, bid in enumerate(top_books)}
 
-    bookId_to_genres    = {r['book_id']: (list(r['genres']) if r['genres'] is not None else []) for _, r in books_df.iterrows()}
-    bookId_to_shelf_ctx = {r['book_id']: r['shelf_context']  for _, r in book_df.iterrows()}
+    bookId_to_genres = {r['book_id']: (list(r['genres']) if r['genres'] is not None else []) for _, r in books_df.iterrows()}
 
     # Per-user avg rating
     avg_ratings = read_df.groupby('user_id')['rating'].mean().to_dict()
@@ -193,14 +193,6 @@ def build_user_features(base: dict, book_df: pd.DataFrame, vocab: dict) -> pd.Da
     genre_ctx_matrix[_ctx['row'].values, _ctx['col_avg'].values]   = _ctx['val_avg'].values
     genre_ctx_matrix[_ctx['row'].values, _ctx['col_genre_frac'].values] = _ctx['val_genre_frac'].values
 
-    # Pre-build shelf matrix (n_top_books × n_shelves) for fast numpy row-mean
-    print("  Building shelf matrix ...")
-    shelf_matrix = np.zeros((len(top_books), n_shelves), dtype=np.float32)
-    for bid, idx in book_to_idx.items():
-        ctx = bookId_to_shelf_ctx.get(bid)
-        if ctx:
-            shelf_matrix[idx] = ctx
-
     # Aggregate read/label history per user
     read_agg = (read_df
                  .groupby('user_id')
@@ -235,12 +227,6 @@ def build_user_features(base: dict, book_df: pd.DataFrame, vocab: dict) -> pd.Da
         hist_ids     = [p[0] for p in pairs]
         hist_ratings = [p[1] for p in pairs]
 
-        # Shelf context — mean of shelf vectors over read history
-        if hist_ids:
-            shelf_ctx = shelf_matrix[hist_ids].mean(axis=0).tolist()
-        else:
-            shelf_ctx = [0.0] * n_shelves
-
         # Labels
         lrow = label_by_user.get(uid)
         if lrow is not None:
@@ -254,9 +240,8 @@ def build_user_features(base: dict, book_df: pd.DataFrame, vocab: dict) -> pd.Da
             'user_id':               uid,
             'avg_rating':            avg_rat,
             'genre_context':         genre_ctx,
-            'read_history':         hist_ids,
-            'read_history_ratings': hist_ratings,
-            'shelf_context':         shelf_ctx,
+            'read_history':          hist_ids,
+            'read_history_ratings':  hist_ratings,
             'label_bookIds':         lbl_books,
             'label_ratings':         lbl_rats,
             'label_timestamps':      lbl_times,
@@ -265,48 +250,6 @@ def build_user_features(base: dict, book_df: pd.DataFrame, vocab: dict) -> pd.Da
     df = pd.DataFrame(rows)
     print(f"  User features: {len(df)} users")
     return df
-
-
-# ── Feature struct (used by dataset/model) ────────────────────────────────────
-
-def load_features(data_dir: str, version: str = FEATURES_VERSION) -> dict:
-    """Load features parquets and return a dict of DataFrames + derived metadata."""
-    book_path = os.path.join(data_dir, f'features_books_{version}.parquet')
-    user_path = os.path.join(data_dir, f'features_users_{version}.parquet')
-    ts_path   = os.path.join(data_dir, 'base_timestamps.parquet')
-
-    print(f"  Loading {book_path} ...")
-    book_df = pd.read_parquet(book_path)
-    print(f"  Loading {user_path} ...")
-    user_df = pd.read_parquet(user_path)
-    print(f"  Loading base_timestamps.parquet ...")
-    ts_df   = pd.read_parquet(ts_path)
-
-    vocab_path = os.path.join(data_dir, 'base_vocab.parquet')
-    print(f"  Loading base_vocab.parquet ...")
-    vocab_df = pd.read_parquet(vocab_path)
-    vocab    = parse_vocab(vocab_df)
-
-    top_books        = book_df['book_id'].tolist()
-    bookId_to_title  = {}
-    base_books_path  = os.path.join(data_dir, 'base_books.parquet')
-    if os.path.exists(base_books_path):
-        bdf = pd.read_parquet(base_books_path, columns=['book_id', 'title'])
-        bookId_to_title = dict(zip(bdf['book_id'], bdf['title']))
-
-    return {
-        'book_df':         book_df,
-        'user_df':         user_df,
-        'vocab':           vocab,
-        'top_books':       top_books,
-        'bookId_to_title': bookId_to_title,
-        'ts_min':          int(ts_df['ts_min'].iloc[0]),
-        'ts_max':          int(ts_df['ts_max'].iloc[0]),
-        'n_genres':        len(vocab['genre_to_i']),
-        'n_shelves':       len(vocab['shelf_to_i']),
-        'n_years':         len(vocab['year_to_i']),
-        'n_authors':       len(vocab['author_to_i']),
-    }
 
 
 # ── Parquet writer (handles list columns) ─────────────────────────────────────
@@ -341,7 +284,7 @@ def run(data_dir: str = 'data', version: str = FEATURES_VERSION) -> None:
     book_df = build_book_features(base, vocab)
 
     print("\n── Building user features ──")
-    user_df = build_user_features(base, book_df, vocab)
+    user_df = build_user_features(base, vocab)
 
     book_out = os.path.join(data_dir, f'features_books_{version}.parquet')
     user_out = os.path.join(data_dir, f'features_users_{version}.parquet')
