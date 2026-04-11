@@ -262,33 +262,16 @@ def _build_user_embedding(model: BookRecommender, fs: FeatureStore, user_type: s
         rat_wts    = hist_wts_t.unsqueeze(-1) * pad_mask                                    # (1, hist, 1)
         wt_sum     = rat_wts.abs().sum(dim=1).clamp(min=1e-6)                               # (1, 1)
 
-        # Book embedding pool
         hist_embs   = model.item_embedding_lookup(hist_idx_t)                               # (1, hist, D)
         history_emb = (hist_embs * rat_wts).sum(dim=1) / wt_sum                             # (1, D)
-
-        # Shelf pool (transform-then-pool, shared tower)
-        hist_shelf_vecs = model.book_shelf_matrix[hist_idx_t]                               # (1, hist, n_shelves)
-        shelf_embs_h    = model.item_shelf_tower(hist_shelf_vecs)                           # (1, hist, shelf_dim)
-        user_shelf_emb  = (shelf_embs_h * rat_wts).sum(dim=1) / wt_sum                     # (1, shelf_dim)
-
-        # Author pool (transform-then-pool, shared tower)
-        hist_author_idx = model.book_author_idx[hist_idx_t]                                 # (1, hist)
-        auth_embs_raw   = model.author_embedding_lookup(hist_author_idx)                    # (1, hist, author_dim)
-        auth_embs       = model.author_tower(auth_embs_raw)                                 # (1, hist, author_dim)
-        user_author_emb = (auth_embs * rat_wts).sum(dim=1) / wt_sum                        # (1, author_dim)
     else:
-        d_hist   = model.item_embedding_lookup.embedding_dim
-        d_shelf  = model.item_shelf_tower[0].out_features
-        d_author = model.author_embedding_lookup.embedding_dim
-        history_emb    = torch.zeros(1, d_hist)
-        user_shelf_emb = torch.zeros(1, d_shelf)
-        user_author_emb = torch.zeros(1, d_author)
+        history_emb = torch.zeros(1, model.item_embedding_lookup.embedding_dim)
 
     X_inf     = torch.tensor([ctx])
     genre_emb = model.user_genre_tower(X_inf)
     ts_emb    = model.timestamp_embedding_tower(model.timestamp_embedding_lookup(ts_inference))
 
-    return torch.cat([history_emb, user_author_emb, user_shelf_emb, genre_emb, ts_emb], dim=1)
+    return torch.cat([history_emb, genre_emb, ts_emb], dim=1)
 
 
 def run_canary_eval(model: BookRecommender, fs: FeatureStore,

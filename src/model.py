@@ -1,22 +1,24 @@
 """
 Two-Tower BookRecommender model.
 
-Extends the movie model with an author tower.
-Two registered buffers replace per-sample tensors:
+Two registered buffers:
   book_shelf_matrix  — (n_books+1, n_shelves) shelf scores per book; last row = padding zeros
   book_author_idx    — (n_books+1,) primary author vocab index per book; last = author padding
 
-Embedding sizes (must satisfy user_dim == item_dim):
-  item_id_embedding_size    = 40   shared: user history pool + item tower
-  author_embedding_size     = 20   shared: item author tower + user author pool
-  shelf_embedding_size      = 30   shared: item shelf tower + user shelf pool
-  user_genre_embedding_size = 30
-  item_genre_embedding_size = 30
-  item_year_embedding_size  = 10
-  timestamp_embedding_size  = 10
+User tower: read history avg pool + genre context + timestamp (no shelf/author pooling)
+Item tower: genre + shelf + book_id + author + year  (all content signals on item side)
 
-  user: 40 + 20 + 30 + 30 + 10 = 130
-  item: 30 + 30 + 40 + 20 + 10 = 130  ✓
+Embedding sizes (must satisfy user_dim == item_dim):
+  item_id_embedding_size    = 40   shared: user history pool + item book tower
+  user_genre_embedding_size = 50
+  timestamp_embedding_size  = 10
+  item_genre_embedding_size = 10   item-only
+  shelf_embedding_size      = 25   item-only
+  author_embedding_size     = 15   item-only
+  item_year_embedding_size  = 10   item-only
+
+  user: 40 + 50 + 10 = 100
+  item: 10 + 25 + 40 + 15 + 10 = 100  ✓
 """
 import torch
 import torch.nn as nn
@@ -67,8 +69,7 @@ class BookRecommender(nn.Module):
             nn.Tanh()
         )
 
-        # ── Shared author tower ───────────────────────────────────────────────
-        # Used on item side (target book's author) and user side (author pool over history)
+        # ── Item-only author tower ────────────────────────────────────────────
         self.author_embedding_lookup = nn.Embedding(
             n_authors + 1, author_embedding_size, padding_idx=n_authors
         )
@@ -77,8 +78,7 @@ class BookRecommender(nn.Module):
             nn.Tanh()
         )
 
-        # ── Shared shelf tower ────────────────────────────────────────────────
-        # Used on item side (target book's shelf vector) and user side (shelf pool over history)
+        # ── Item-only shelf tower ─────────────────────────────────────────────
         self.item_shelf_tower = nn.Sequential(
             nn.Linear(n_shelves, shelf_embedding_size),
             nn.Tanh()
@@ -109,8 +109,7 @@ class BookRecommender(nn.Module):
         )
 
         # ── Dimension check ───────────────────────────────────────────────────
-        user_dim = (item_id_embedding_size + author_embedding_size
-                    + shelf_embedding_size + user_genre_embedding_size
+        user_dim = (item_id_embedding_size + user_genre_embedding_size
                     + timestamp_embedding_size)
         item_dim = (item_genre_embedding_size + shelf_embedding_size
                     + item_id_embedding_size + author_embedding_size
@@ -118,8 +117,7 @@ class BookRecommender(nn.Module):
         if user_dim != item_dim:
             raise ValueError(
                 f"User dim ({user_dim}) != item dim ({item_dim}). "
-                f"user: history {item_id_embedding_size} + author {author_embedding_size} "
-                f"+ shelf {shelf_embedding_size} + genre {user_genre_embedding_size} "
+                f"user: history {item_id_embedding_size} + genre {user_genre_embedding_size} "
                 f"+ ts {timestamp_embedding_size}. "
                 f"item: genre {item_genre_embedding_size} + shelf {shelf_embedding_size} "
                 f"+ book {item_id_embedding_size} + author {author_embedding_size} "
@@ -157,23 +155,11 @@ class BookRecommender(nn.Module):
         history_embs = self.item_embedding_lookup(X_history)                     # (batch, hist, D)
         history_emb  = (history_embs * rating_weights).sum(dim=1) / weight_sum   # (batch, D)
 
-        # ── User: shelf pool (transform then pool, shared tower) ──────────────
-        history_shelves = self.book_shelf_matrix[X_history]                      # (batch, hist, n_shelves)
-        shelf_embs      = self.item_shelf_tower(history_shelves)                 # (batch, hist, shelf_dim)
-        user_shelf_emb  = (shelf_embs * rating_weights).sum(dim=1) / weight_sum  # (batch, shelf_dim)
-
-        # ── User: author pool (transform then pool, shared tower) ─────────────
-        history_author_idx = self.book_author_idx[X_history]                     # (batch, hist)
-        author_embs_raw    = self.author_embedding_lookup(history_author_idx)    # (batch, hist, author_dim)
-        author_embs        = self.author_tower(author_embs_raw)                  # (batch, hist, author_dim)
-        user_author_emb    = (author_embs * rating_weights).sum(dim=1) / weight_sum  # (batch, author_dim)
-
         # ── User: genre and timestamp ─────────────────────────────────────────
         genre_emb     = self.user_genre_tower(X_genre)
         ts_emb        = self.timestamp_embedding_tower(
                             self.timestamp_embedding_lookup(timestamps))
-        user_combined = torch.cat([history_emb, user_author_emb, user_shelf_emb,
-                                   genre_emb, ts_emb], dim=1)
+        user_combined = torch.cat([history_emb, genre_emb, ts_emb], dim=1)
 
         # ── Item towers ───────────────────────────────────────────────────────
         item_genre_emb  = self.item_genre_tower(target_genre)
