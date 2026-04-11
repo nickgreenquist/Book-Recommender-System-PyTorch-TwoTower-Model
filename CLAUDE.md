@@ -213,6 +213,19 @@ Canary users are synthetic — no real read timestamps. All receive `ts_max_bin`
 
 See the movie repo's CLAUDE.md "Future User Tower Improvements" and "Richer Cross-Signal Features" sections for additional ideas that apply equally here.
 
+## Serving / Export Notes
+
+`book_shelf_matrix` (registered buffer, 11124 × 3032 × float32 ≈ 135MB) cannot be saved inside `model.pth` — it would exceed GitHub's 100MB file limit.
+
+In `export.py`, exclude the buffers from the saved state_dict:
+```python
+state_dict = {k: v for k, v in model.state_dict().items()
+              if k not in ('book_shelf_matrix', 'book_author_idx')}
+torch.save(state_dict, model_path)
+```
+
+Store `book_shelf_matrix` and `book_author_idx` separately in `feature_store.pt` instead. The Streamlit app rebuilds the model via `build_model(config, fs)` which reconstructs the buffers from the FeatureStore — same as training. Only the learned weights need to come from the checkpoint.
+
 ## Git Workflow
 
 Never commit and push in the same command. Always commit first, then ask before pushing.

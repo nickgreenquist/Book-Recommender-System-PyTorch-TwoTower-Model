@@ -125,7 +125,8 @@ def load_features(data_dir: str = 'data', version: str = 'v1') -> FeatureStore:
     user_to_book_to_rating_LABEL    = {}
     user_to_book_to_timestamp_LABEL = {}
 
-    for _, row in user_feat_df.iterrows():
+    from tqdm import tqdm
+    for _, row in tqdm(user_feat_df.iterrows(), total=len(user_feat_df), desc="Loading user features"):
         uid = row['user_id']
         user_ids.append(uid)
         user_to_avg_rating[uid]           = float(row['avg_rating'])
@@ -205,10 +206,11 @@ def build_dataset(users: list, fs: FeatureStore) -> tuple:
     Returns a tuple of 9 elements:
       X_genre, X_history (list), X_history_ratings (list),
       timestamp, Y, target_book_idx,
-      target_genre_context, target_shelf_context, target_year, target_author_idx
+      target_genre_context, target_year, target_author_idx
 
-    Note: shelf context is not stored per sample. The model looks up shelf vectors
-    from book_shelf_matrix using read_history and target_book_idx at forward pass time.
+    Note: shelf context is NOT stored per sample — neither user-side nor item-side.
+    The model looks up shelf vectors from book_shelf_matrix (registered buffer) using
+    read_history and target_book_idx at forward pass time.
     """
     X_genre               = []
     X_history             = []
@@ -217,7 +219,6 @@ def build_dataset(users: list, fs: FeatureStore) -> tuple:
     Y                     = []
     target_book_idx       = []
     target_genre_context  = []
-    target_shelf_context  = []
     target_year           = []
     target_author_idx     = []
 
@@ -233,7 +234,6 @@ def build_dataset(users: list, fs: FeatureStore) -> tuple:
             Y.append(float(rating) - fs.user_to_avg_rating[user])
             target_book_idx.append(fs.bookId_to_idx[book_id])
             target_genre_context.append(fs.bookId_to_genre_context[book_id])
-            target_shelf_context.append(fs.bookId_to_shelf_context[book_id])
             target_year.append(fs.year_to_i.get(fs.bookId_to_year[book_id], 0))
             target_author_idx.append(fs.bookId_to_author_idx[book_id])
 
@@ -254,11 +254,9 @@ def build_dataset(users: list, fs: FeatureStore) -> tuple:
 
     print("  genre context ...")
     target_genre_t = torch.from_numpy(np.array(target_genre_context, dtype=np.float32))
-    print("  shelf context ...")
-    target_shelf_t = torch.from_numpy(np.array(target_shelf_context, dtype=np.float32))
 
     return (X_genre_t, X_history, X_history_ratings, timestamp_t, Y_t,
-            target_book_idx_t, target_genre_t, target_shelf_t,
+            target_book_idx_t, target_genre_t,
             target_year_t, target_author_idx_t)
 
 
@@ -286,7 +284,7 @@ def load_splits(data_dir: str = 'data', version: str = 'v1') -> tuple:
 def make_splits(fs: FeatureStore, pct_train: float = 0.9, seed: int = 42) -> tuple:
     """
     Split users into train/val, build tensors for each.
-    Returns (train_data, val_data) where each is the 11-tuple from build_dataset().
+    Returns (train_data, val_data) where each is the 9-tuple from build_dataset().
     """
     final_users = [
         u for u in fs.user_ids
