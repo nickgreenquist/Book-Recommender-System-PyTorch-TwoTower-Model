@@ -510,6 +510,7 @@ def run_canary(data_dir: str = 'data', checkpoint_path: str = None,
 
 PROBE_SIMILAR_TITLES = [
     'A Game of Thrones (A Song of Ice and Fire, #1)',
+    'The Fellowship of the Ring (The Lord of the Rings, #1)',
     "Harry Potter and the Sorcerer's Stone (Harry Potter, #1)",
     'Gone Girl',
     'The Hunger Games (The Hunger Games, #1)',
