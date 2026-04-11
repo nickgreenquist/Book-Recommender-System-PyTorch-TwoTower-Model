@@ -292,11 +292,9 @@ def _build_user_embedding(model: BookRecommender, fs: FeatureStore, user_type: s
 
 
 def run_canary_eval(model: BookRecommender, fs: FeatureStore,
-                    book_embeddings: dict, all_ids: list, all_norm: torch.Tensor,
+                    book_embeddings: dict, all_ids: list, all_embs: torch.Tensor,
                     top_n: int = 10) -> None:
-    """Run all canary users and print recommendation tables.
-    Scores via cosine similarity to avoid popularity bias from high-magnitude item embeddings.
-    """
+    """Run all canary users and print recommendation tables."""
     model.eval()
 
     ts_max_bin = torch.bucketize(
@@ -312,8 +310,7 @@ def run_canary_eval(model: BookRecommender, fs: FeatureStore,
             anchor_titles = _get_anchor_titles(fs, shelf_tags, exclude=set(fav_books))
             exclude_set   = set(fav_books) | set(anchor_titles)
 
-            user_norm  = F.normalize(user_emb, dim=1)
-            raw_scores = (all_norm @ user_norm.T).squeeze(-1)
+            raw_scores = (all_embs @ user_emb.T).squeeze(-1)
             scores     = {all_ids[i]: raw_scores[i].item() for i in range(len(all_ids))}
 
             recs       = []
@@ -525,7 +522,7 @@ def run_canary(data_dir: str = 'data', checkpoint_path: str = None,
     fs = load_features(data_dir, version)
     model, book_embeddings, all_ids, all_embs, all_norm = _load_model_and_embeddings(cp, fs)
     print("\n── Canary user evaluation ──")
-    run_canary_eval(model, fs, book_embeddings, all_ids, all_norm)
+    run_canary_eval(model, fs, book_embeddings, all_ids, all_embs)
 
 
 PROBE_SIMILAR_TITLES = [
