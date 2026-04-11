@@ -56,6 +56,7 @@ def get_config() -> dict:
         'item_year_embedding_size':  item_year_embedding_size,
         # Training
         'lr':               0.001,
+        'weight_decay':     1e-4,
         'minibatch_size':   64,
         'training_steps':   150_000,
         'log_every':        10_000,
@@ -156,7 +157,8 @@ def train(model: BookRecommender, train_data: tuple, val_data: tuple,
 
     pad_idx          = len(fs.top_books)
     loss_fn          = torch.nn.MSELoss()
-    optimizer        = torch.optim.Adam(model.parameters(), lr=config['lr'])
+    optimizer        = torch.optim.Adam(model.parameters(), lr=config['lr'],
+                                        weight_decay=config['weight_decay'])
     minibatch_size   = config['minibatch_size']
     training_steps   = config['training_steps']
     log_every        = config['log_every']

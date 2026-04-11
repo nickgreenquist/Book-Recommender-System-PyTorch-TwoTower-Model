@@ -27,7 +27,7 @@ from src.train import build_model, get_config, print_model_summary
 USER_TYPE_TO_FAVORITE_GENRES = {
     'Mystery Lover':   ['mystery, thriller, crime'],
     'Fantasy Lover':   ['fantasy, paranormal'],
-    'Romance Lover':   ['romance'],
+    'Romance Lover':   ['romance', 'young-adult'],
     'YA Lover':        ['young-adult'],
     'History Lover':   ['history, historical fiction, biography'],
     'Literary Lover':  ['fiction'],
@@ -328,18 +328,22 @@ def run_canary_eval(model: BookRecommender, fs: FeatureStore,
 
 # ── Embedding probes ──────────────────────────────────────────────────────────
 
-def probe_genre(model: BookRecommender, genre: str, book_embeddings: dict,
+def probe_genre(model: BookRecommender, genre, book_embeddings: dict,
                 fs: FeatureStore, top_n: int = 10) -> None:
     """
     Find the most representative books for a genre in item genre embedding space.
-    Passes a one-hot genre vector through item_genre_tower, compares via cosine similarity.
+    Passes a one-hot (or multi-hot) genre vector through item_genre_tower, compares via cosine similarity.
+    genre may be a single string or a list of strings.
     """
-    if genre not in fs.genre_to_i:
-        print(f"Genre '{genre}' not in vocabulary. Available: {fs.genres_ordered}")
-        return
+    genres = [genre] if isinstance(genre, str) else genre
+    for g in genres:
+        if g not in fs.genre_to_i:
+            print(f"Genre '{g}' not in vocabulary. Available: {fs.genres_ordered}")
+            return
 
     ctx = [0.0] * len(fs.genres_ordered)
-    ctx[fs.genre_to_i[genre]] = 1.0
+    for g in genres:
+        ctx[fs.genre_to_i[g]] = 1.0
 
     with torch.no_grad():
         query_emb = model.item_genre_tower(torch.tensor([ctx])).view(-1)
@@ -352,7 +356,8 @@ def probe_genre(model: BookRecommender, genre: str, book_embeddings: dict,
         for bid in fs.top_books
     }
 
-    print(f"\nTop-{top_n} books for genre '{genre}':")
+    label = ' + '.join(genres)
+    print(f"\nTop-{top_n} books for genre '{label}':")
     seen = set()
     for bid, sim in sorted(sims.items(), key=lambda x: x[1], reverse=True):
         if len(seen) >= top_n:
@@ -360,7 +365,8 @@ def probe_genre(model: BookRecommender, genre: str, book_embeddings: dict,
         title = fs.bookId_to_title[bid]
         if title not in seen:
             seen.add(title)
-            print(f"  {sim:.4f}  {title}")
+            book_genres = ', '.join(fs.bookId_to_genres.get(bid, []))
+            print(f"  {sim:.4f}  {title}  [{book_genres}]")
 
 
 def probe_shelf(model: BookRecommender, shelf_tags: list, book_embeddings: dict,
@@ -534,7 +540,7 @@ def run_probes(data_dir: str = 'data', checkpoint_path: str = None,
     print("\n── Embedding probes ──")
     probe_genre(model, 'mystery, thriller, crime', book_embeddings, fs)
     probe_genre(model, 'fantasy, paranormal',      book_embeddings, fs)
-    probe_genre(model, 'romance',                  book_embeddings, fs)
+    probe_genre(model, ['romance', 'young-adult'],  book_embeddings, fs)
     probe_shelf(model, ['horror', 'scary', 'dark'],          book_embeddings, fs)
     probe_shelf(model, ['science-fiction', 'sci-fi', 'space'], book_embeddings, fs)
     probe_shelf(model, ['epic-fantasy', 'magic', 'world-building'], book_embeddings, fs)
