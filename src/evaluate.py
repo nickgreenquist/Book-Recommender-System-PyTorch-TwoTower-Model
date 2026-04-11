@@ -313,12 +313,14 @@ def run_canary_eval(model: BookRecommender, fs: FeatureStore,
             raw_scores = (all_embs @ user_emb.T).squeeze(-1)
             scores     = {all_ids[i]: raw_scores[i].item() for i in range(len(all_ids))}
 
-            recs = []
+            recs       = []
+            seen_titles = set(exclude_set)
             for bid, _ in sorted(scores.items(), key=lambda x: x[1], reverse=True):
                 if len(recs) >= top_n:
                     break
                 title = fs.bookId_to_title[bid]
-                if title not in exclude_set:
+                if title not in seen_titles:
+                    seen_titles.add(title)
                     recs.append(title)
 
             fav_genres      = ', '.join(USER_TYPE_TO_FAVORITE_GENRES[user_type]) or '—'
@@ -368,8 +370,14 @@ def probe_genre(model: BookRecommender, genre: str, book_embeddings: dict,
     }
 
     print(f"\nTop-{top_n} books for genre '{genre}':")
-    for bid, sim in sorted(sims.items(), key=lambda x: x[1], reverse=True)[:top_n]:
-        print(f"  {sim:.4f}  {fs.bookId_to_title[bid]}")
+    seen = set()
+    for bid, sim in sorted(sims.items(), key=lambda x: x[1], reverse=True):
+        if len(seen) >= top_n:
+            break
+        title = fs.bookId_to_title[bid]
+        if title not in seen:
+            seen.add(title)
+            print(f"  {sim:.4f}  {title}")
 
 
 def probe_shelf(model: BookRecommender, shelf_tags: list, book_embeddings: dict,
@@ -405,11 +413,17 @@ def probe_shelf(model: BookRecommender, shelf_tags: list, book_embeddings: dict,
         for bid in fs.top_books
     }
 
-    anchor_set = set(anchors)
+    anchor_set  = set(anchors)
+    seen_titles = set()
     print(f"Top-{top_n} books:")
-    for bid, sim in sorted(sims.items(), key=lambda x: x[1], reverse=True)[:top_n]:
-        marker = " [seed]" if bid in anchor_set else ""
-        print(f"  {sim:.4f}  {fs.bookId_to_title[bid]}{marker}")
+    for bid, sim in sorted(sims.items(), key=lambda x: x[1], reverse=True):
+        if len(seen_titles) >= top_n:
+            break
+        title = fs.bookId_to_title[bid]
+        if title not in seen_titles:
+            seen_titles.add(title)
+            marker = " [seed]" if bid in anchor_set else ""
+            print(f"  {sim:.4f}  {title}{marker}")
 
 
 def probe_similar(book_embeddings: dict, fs: FeatureStore,
@@ -434,11 +448,14 @@ def probe_similar(book_embeddings: dict, fs: FeatureStore,
         sims    = (all_norm @ query.T).squeeze(-1)
         top_idx = sims.argsort(descending=True)
         results = []
+        seen_titles = {title}  # exclude seed title and all its duplicate editions
         for idx in top_idx:
-            candidate = all_ids[idx.item()]
-            if candidate == bid:
+            candidate       = all_ids[idx.item()]
+            candidate_title = fs.bookId_to_title[candidate]
+            if candidate_title in seen_titles:
                 continue
-            results.append(fs.bookId_to_title[candidate])
+            seen_titles.add(candidate_title)
+            results.append(candidate_title)
             if len(results) >= top_n:
                 break
         rows.append((title, results))
