@@ -18,29 +18,27 @@ from src.model import BookRecommender
 
 def get_config() -> dict:
     """All training hyperparameters in one place."""
-    # Shared dims (appear on both user and item sides — cannot be set independently)
-    item_id_embedding_size    = 40   # user history pool + item tower
-    author_embedding_size     = 20   # user author pool + item author tower
-    shelf_embedding_size      = 30   # user shelf pool + item shelf tower
+    # Shared dim (user history pool + item book tower — cannot be set independently)
+    item_id_embedding_size    = 40
 
     # User-only
-    user_genre_embedding_size = 30
+    user_genre_embedding_size = 50
     timestamp_embedding_size  = 10
 
-    # Item-only
-    item_genre_embedding_size = 30
+    # Item-only (shelf and author are no longer on the user side)
+    item_genre_embedding_size = 10
+    shelf_embedding_size      = 25
+    author_embedding_size     = 15
     item_year_embedding_size  = 10
 
-    user_dim = (item_id_embedding_size + author_embedding_size
-                + shelf_embedding_size + user_genre_embedding_size
+    user_dim = (item_id_embedding_size + user_genre_embedding_size
                 + timestamp_embedding_size)
     item_dim = (item_genre_embedding_size + shelf_embedding_size
                 + item_id_embedding_size + author_embedding_size
                 + item_year_embedding_size)
     assert user_dim == item_dim, (
         f"Tower size mismatch — user={user_dim} "
-        f"(history={item_id_embedding_size} + author={author_embedding_size} "
-        f"+ shelf={shelf_embedding_size} + genre={user_genre_embedding_size} "
+        f"(history={item_id_embedding_size} + genre={user_genre_embedding_size} "
         f"+ ts={timestamp_embedding_size}), "
         f"item={item_dim} "
         f"(genre={item_genre_embedding_size} + shelf={shelf_embedding_size} "
@@ -57,8 +55,7 @@ def get_config() -> dict:
         'item_genre_embedding_size': item_genre_embedding_size,
         'item_year_embedding_size':  item_year_embedding_size,
         # Training
-        'lr':               0.005,
-        'momentum':         0.9,
+        'lr':               0.001,
         'minibatch_size':   64,
         'training_steps':   150_000,
         'log_every':        10_000,
@@ -115,12 +112,10 @@ def build_model(config: dict, fs: FeatureStore) -> BookRecommender:
 
 def print_model_summary(model: BookRecommender) -> None:
     m = model
-    history_dim  = m.item_embedding_lookup.embedding_dim
-    author_dim   = m.author_tower[0].out_features
-    shelf_dim    = m.item_shelf_tower[0].out_features
-    genre_dim    = m.user_genre_tower[0].out_features
-    ts_dim       = m.timestamp_embedding_lookup.embedding_dim
-    user_total   = history_dim + author_dim + shelf_dim + genre_dim + ts_dim
+    history_dim = m.item_embedding_lookup.embedding_dim
+    genre_dim   = m.user_genre_tower[0].out_features
+    ts_dim      = m.timestamp_embedding_lookup.embedding_dim
+    user_total  = history_dim + genre_dim + ts_dim
 
     item_genre_dim  = m.item_genre_tower[0].out_features
     item_shelf_dim  = m.item_shelf_tower[0].out_features
@@ -132,8 +127,7 @@ def print_model_summary(model: BookRecommender) -> None:
     n_params = sum(p.nelement() for p in model.parameters() if p.requires_grad)
 
     print(f"\n── Model dimensions ──")
-    print(f"  User side:  history({history_dim}) + author({author_dim}) + shelf({shelf_dim})"
-          f" + genre({genre_dim}) + ts({ts_dim})  =  {user_total}")
+    print(f"  User side:  history({history_dim}) + genre({genre_dim}) + ts({ts_dim})  =  {user_total}")
     print(f"  Item side:  genre({item_genre_dim}) + shelf({item_shelf_dim})"
           f" + book({item_book_dim}) + author({item_author_dim}) + year({year_dim})  =  {item_total}")
     print(f"  Parameters: {n_params:,}")
@@ -162,8 +156,7 @@ def train(model: BookRecommender, train_data: tuple, val_data: tuple,
 
     pad_idx          = len(fs.top_books)
     loss_fn          = torch.nn.MSELoss()
-    optimizer        = torch.optim.SGD(model.parameters(),
-                                       lr=config['lr'], momentum=config['momentum'])
+    optimizer        = torch.optim.Adam(model.parameters(), lr=config['lr'])
     minibatch_size   = config['minibatch_size']
     training_steps   = config['training_steps']
     log_every        = config['log_every']
