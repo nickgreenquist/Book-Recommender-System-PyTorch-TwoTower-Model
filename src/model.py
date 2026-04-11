@@ -79,8 +79,11 @@ class BookRecommender(nn.Module):
         )
 
         # ── Item-only shelf tower ─────────────────────────────────────────────
+        shelf_hidden = 128
         self.item_shelf_tower = nn.Sequential(
-            nn.Linear(n_shelves, shelf_embedding_size),
+            nn.Linear(n_shelves, shelf_hidden),
+            nn.Tanh(),
+            nn.Linear(shelf_hidden, shelf_embedding_size),
             nn.Tanh()
         )
 
@@ -96,8 +99,11 @@ class BookRecommender(nn.Module):
         )
 
         # ── User-only towers ──────────────────────────────────────────────────
+        genre_hidden = 64
         self.user_genre_tower = nn.Sequential(
-            nn.Linear(user_context_size, user_genre_embedding_size),
+            nn.Linear(user_context_size, genre_hidden),
+            nn.Tanh(),
+            nn.Linear(genre_hidden, user_genre_embedding_size),
             nn.Tanh()
         )
         self.timestamp_embedding_lookup = nn.Embedding(

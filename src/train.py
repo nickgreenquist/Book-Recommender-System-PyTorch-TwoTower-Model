@@ -114,15 +114,15 @@ def build_model(config: dict, fs: FeatureStore) -> BookRecommender:
 def print_model_summary(model: BookRecommender) -> None:
     m = model
     history_dim = m.item_embedding_lookup.embedding_dim
-    genre_dim   = m.user_genre_tower[0].out_features
+    genre_dim   = m.user_genre_tower[-2].out_features  # last Linear before final Tanh
     ts_dim      = m.timestamp_embedding_lookup.embedding_dim
     user_total  = history_dim + genre_dim + ts_dim
 
-    item_genre_dim  = m.item_genre_tower[0].out_features
-    item_shelf_dim  = m.item_shelf_tower[0].out_features
-    item_book_dim   = m.item_embedding_tower[0].out_features
-    item_author_dim = m.author_tower[0].out_features
-    year_dim        = m.year_embedding_tower[0].out_features
+    item_genre_dim  = m.item_genre_tower[-2].out_features
+    item_shelf_dim  = m.item_shelf_tower[-2].out_features
+    item_book_dim   = m.item_embedding_tower[-2].out_features
+    item_author_dim = m.author_tower[-2].out_features
+    year_dim        = m.year_embedding_tower[-2].out_features
     item_total      = item_genre_dim + item_shelf_dim + item_book_dim + item_author_dim + year_dim
 
     n_params = sum(p.nelement() for p in model.parameters() if p.requires_grad)
