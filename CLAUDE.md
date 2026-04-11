@@ -203,6 +203,8 @@ Canary users are synthetic — no real read timestamps. All receive `ts_max_bin`
 
 ### Item features
 
+- **Shelf tower: EmbeddingBag instead of Linear** — v1 uses `nn.Linear(n_shelves, shelf_dim)` which treats the shelf context as a dense vector. But shelf vectors are sparse: a book appears on ~20–100 shelves out of 3032, so most input dimensions are zero. This is architecturally different from MovieLens genome tags, which are pre-computed ML scores for *every* movie-tag pair (dense). For sparse inputs, `nn.EmbeddingBag` (or `nn.Embedding` + weighted avg pool) is more natural: each shelf gets a learned embedding, and only the book's actual shelves activate and receive gradient. Same parameter count, cleaner gradient flow, more analogous to how book history and author pooling already work.
+
 - **Better shelf-relevance scoring (TF-IDF style)** — v1 uses `shelf_count / total_shelf_count_for_book`. Generic shelves like "to-read" and "fiction" score high on nearly every book and carry little information. A better score: `(shelf_count / total_for_book) * log(total_books / books_with_this_shelf)` — suppresses common shelves, amplifies specific ones like "cozy-mystery". Requires per-shelf document frequency computed during `preprocess books`.
 
 - **Book description embeddings** — `goodreads_books.json` includes a `description` field. Encoding with a sentence transformer (e.g. `all-MiniLM-L6-v2`) would add dense semantic signal. Skipped in v1 to keep a simple baseline and avoid heavy text encoder dependency.
