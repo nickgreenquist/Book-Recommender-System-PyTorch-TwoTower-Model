@@ -8,7 +8,7 @@ Usage (from train.py or main.py):
 """
 import os
 import random
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import numpy as np
 import pandas as pd
@@ -46,19 +46,19 @@ class FeatureStore:
     bookId_to_shelf_context: dict
     bookId_to_author_idx:    dict  # book_id → primary author vocab index
 
-    # Per-user lookups
-    user_ids:                        list
-    user_to_avg_rating:              dict
-    user_to_genre_context:           dict
-    user_to_read_history:            dict
-    user_to_read_history_ratings:    dict
-    user_to_book_to_rating_LABEL:    dict
-    user_to_book_to_timestamp_LABEL: dict
+    # Per-user lookups (absent when loaded via load_book_features)
+    user_ids:                        list  = field(default_factory=list)
+    user_to_avg_rating:              dict  = field(default_factory=dict)
+    user_to_genre_context:           dict  = field(default_factory=dict)
+    user_to_read_history:            dict  = field(default_factory=dict)
+    user_to_read_history_ratings:    dict  = field(default_factory=dict)
+    user_to_book_to_rating_LABEL:    dict  = field(default_factory=dict)
+    user_to_book_to_timestamp_LABEL: dict  = field(default_factory=dict)
 
     # Derived constants
-    user_context_size:   int
-    timestamp_num_bins:  int
-    timestamp_bins:      torch.Tensor
+    user_context_size:   int          = 0
+    timestamp_num_bins:  int          = TIMESTAMP_NUM_BINS
+    timestamp_bins:      torch.Tensor = field(default_factory=lambda: torch.tensor([]))
 
 
 # ── Loader ────────────────────────────────────────────────────────────────────
@@ -175,6 +175,76 @@ def load_features(data_dir: str = 'data', version: str = 'v1') -> FeatureStore:
         user_context_size=user_context_size,
         timestamp_num_bins=TIMESTAMP_NUM_BINS,
         timestamp_bins=timestamp_bins,
+    )
+
+
+def load_book_features(data_dir: str = 'data', version: str = 'v1') -> FeatureStore:
+    """Load only book-side features — skips the slow 525k-user parquet.
+    Suitable for probes and export; user_* fields are empty."""
+    vocab_df = pd.read_parquet(os.path.join(data_dir, 'base_vocab.parquet'))
+    books_df = pd.read_parquet(os.path.join(data_dir, 'base_books.parquet'))
+
+    book_feat_df = pq.read_table(
+        os.path.join(data_dir, f'features_books_{version}.parquet')
+    ).to_pandas()
+
+    g = vocab_df[vocab_df['type'] == 'genre'].sort_values('index')
+    s = vocab_df[vocab_df['type'] == 'shelf'].sort_values('index')
+    y = vocab_df[vocab_df['type'] == 'year'].sort_values('index')
+    a = vocab_df[vocab_df['type'] == 'author'].sort_values('index')
+
+    genres_ordered  = g['value'].tolist()
+    shelves_ordered = s['value'].tolist()
+    years_ordered   = y['value'].tolist()
+    authors_ordered = a['value'].tolist()
+
+    genre_to_i  = dict(zip(g['value'], g['index'].astype(int)))
+    shelf_to_i  = dict(zip(s['value'], s['index'].astype(int)))
+    year_to_i   = dict(zip(y['value'], y['index'].astype(int)))
+    author_to_i = dict(zip(a['value'], a['index'].astype(int)))
+
+    top_books     = books_df['book_id'].tolist()
+    bookId_to_idx = {bid: i for i, bid in enumerate(top_books)}
+
+    bookId_to_title  = {}
+    title_to_bookId  = {}
+    bookId_to_year   = {}
+    bookId_to_genres = {}
+    for _, row in books_df.iterrows():
+        bid = row['book_id']
+        bookId_to_title[bid]      = row['title']
+        title_to_bookId[row['title']] = bid
+        bookId_to_year[bid]       = str(row['year'])
+        bookId_to_genres[bid]     = list(row['genres']) if row['genres'] is not None else []
+
+    bookId_to_genre_context = {}
+    bookId_to_shelf_context = {}
+    bookId_to_author_idx    = {}
+    for _, row in book_feat_df.iterrows():
+        bid = row['book_id']
+        bookId_to_genre_context[bid] = list(row['genre_context'])
+        bookId_to_shelf_context[bid] = list(row['shelf_context'])
+        bookId_to_author_idx[bid]    = int(row['author_idx'])
+
+    return FeatureStore(
+        top_books=top_books,
+        genres_ordered=genres_ordered,
+        shelves_ordered=shelves_ordered,
+        years_ordered=years_ordered,
+        authors_ordered=authors_ordered,
+        genre_to_i=genre_to_i,
+        shelf_to_i=shelf_to_i,
+        year_to_i=year_to_i,
+        author_to_i=author_to_i,
+        bookId_to_idx=bookId_to_idx,
+        bookId_to_title=bookId_to_title,
+        title_to_bookId=title_to_bookId,
+        bookId_to_year=bookId_to_year,
+        bookId_to_genres=bookId_to_genres,
+        bookId_to_genre_context=bookId_to_genre_context,
+        bookId_to_shelf_context=bookId_to_shelf_context,
+        bookId_to_author_idx=bookId_to_author_idx,
+        user_context_size=2 * len(genres_ordered),
     )
 
 

@@ -459,27 +459,24 @@ def probe_similar(book_embeddings: dict, fs: FeatureStore,
         print(row)
 
 
-# ── Shared setup ──────────────────────────────────────────────────────────────
+# ── Setup helpers ─────────────────────────────────────────────────────────────
 
-def _setup(data_dir: str, checkpoint_path: str, version: str):
-    """Load features, build model, load checkpoint, build embeddings."""
-    from src.dataset import load_features
+def _resolve_checkpoint(checkpoint_path: str, checkpoint_dir: str):
+    if checkpoint_path is not None:
+        return checkpoint_path
+    pattern    = os.path.join(checkpoint_dir, 'best_checkpoint_*.pth')
+    candidates = sorted(glob.glob(pattern), key=os.path.getmtime, reverse=True)
+    if not candidates:
+        print("No checkpoint found in saved_models/. Train a model first.")
+        return None
+    return candidates[0]
 
+
+def _load_model_and_embeddings(checkpoint_path: str, fs):
+    """Build model, load weights, pre-compute book embeddings."""
     config = get_config()
-    if checkpoint_path is None:
-        pattern    = os.path.join(config['checkpoint_dir'], 'best_checkpoint_*.pth')
-        candidates = sorted(glob.glob(pattern), key=os.path.getmtime, reverse=True)
-        if not candidates:
-            print("No checkpoint found in saved_models/. Train a model first.")
-            return None, None, None, None, None, None
-        checkpoint_path = candidates[0]
-
     print(f"Loading checkpoint: {checkpoint_path}")
     state_dict = torch.load(checkpoint_path, weights_only=True)
-
-    print("Loading features ...")
-    fs = load_features(data_dir, version)
-
     model = build_model(config, fs)
     model.load_state_dict(state_dict)
     model.eval()
@@ -492,18 +489,21 @@ def _setup(data_dir: str, checkpoint_path: str, version: str):
     all_ids  = list(book_embeddings.keys())
     all_embs = torch.cat([book_embeddings[bid]['BOOK_EMBEDDING_COMBINED'] for bid in all_ids], dim=0)
     all_norm = F.normalize(all_embs, dim=1)
-
-    return model, fs, book_embeddings, all_ids, all_embs, all_norm
+    return model, book_embeddings, all_ids, all_embs, all_norm
 
 
 # ── Orchestrators ─────────────────────────────────────────────────────────────
 
 def run_canary(data_dir: str = 'data', checkpoint_path: str = None,
                version: str = 'v1') -> None:
-    model, fs, book_embeddings, all_ids, all_embs, all_norm = _setup(
-        data_dir, checkpoint_path, version)
-    if model is None:
+    from src.dataset import load_features
+    config = get_config()
+    cp = _resolve_checkpoint(checkpoint_path, config['checkpoint_dir'])
+    if cp is None:
         return
+    print("Loading features ...")
+    fs = load_features(data_dir, version)
+    model, book_embeddings, all_ids, all_embs, all_norm = _load_model_and_embeddings(cp, fs)
     print("\n── Canary user evaluation ──")
     run_canary_eval(model, fs, book_embeddings, all_ids, all_embs)
 
@@ -522,10 +522,14 @@ PROBE_SIMILAR_TITLES = [
 
 def run_probes(data_dir: str = 'data', checkpoint_path: str = None,
                version: str = 'v1') -> None:
-    model, fs, book_embeddings, all_ids, all_embs, all_norm = _setup(
-        data_dir, checkpoint_path, version)
-    if model is None:
+    from src.dataset import load_book_features
+    config = get_config()
+    cp = _resolve_checkpoint(checkpoint_path, config['checkpoint_dir'])
+    if cp is None:
         return
+    print("Loading book features ...")
+    fs = load_book_features(data_dir, version)
+    model, book_embeddings, all_ids, all_embs, all_norm = _load_model_and_embeddings(cp, fs)
     print("\n── Embedding probes ──")
     probe_genre(model, 'mystery, thriller, crime', book_embeddings, fs)
     probe_genre(model, 'fantasy, paranormal',      book_embeddings, fs)
