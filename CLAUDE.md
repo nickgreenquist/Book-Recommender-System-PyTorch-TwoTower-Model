@@ -210,9 +210,9 @@ Canary users are synthetic — no real read timestamps. All receive `ts_max_bin`
 **~~Sampled softmax~~** — ✅ Implemented and validated. Softmax is now the primary training path (`python main.py train softmax`). ID embeddings gained semantic structure vs BPR (King/horror cluster, LOTR/fantasy cluster confirmed via probe and canary). Canary results are strong for Literary, NonFiction, Fantasy, Sci-Fi, History, YA. Known weak spots: Horror (no horror genre in vocab — relies purely on shelf signals) and Romance (model conflates literary women's fiction with romance).
 
 **Next training improvements:**
-1. **LR schedule** — cosine decay from 0.001→0 over training steps. Train loss plateaued at step ~30k (4.62→4.54 over 120k more steps) suggesting the model is jittering in a basin rather than converging. Adam adapts per-parameter scale but not the global LR ceiling.
-2. **Larger batch** — 512 gives 2× more negatives (511 vs 255), reduces val loss variance, harder task = potentially better gradients.
-3. **Upfront random rollback sampling** — current dataset builder samples K random positions per user upfront (not sequential A→B, AB→C), which is correct. Verify this is in the current dataset.
+1. **~~LR schedule~~** — ✅ Implemented. CosineAnnealingLR from 0.001→0 over training steps. Eliminated the early plateau seen in the first softmax run.
+2. **~~Larger batch~~** — ✅ 512 (511 in-batch negatives). Confirmed better drop-from-baseline than batch=256.
+3. **In-batch negative debiasing (log-frequency correction)** — with in-batch negatives, popular books appear as negatives more often than rare ones (they show up in more users' batches). This teaches the model a shortcut: avoid recommending popular items. Fix: subtract `log(p_i)` from each negative item's logit before the softmax, where `p_i` is the item's sampling probability (proportional to its frequency in training data). Google's two-tower rec papers apply this even with in-batch negatives. Implementation: compute item frequencies from the training dataset, build a probability table, and apply the correction in the loss computation.
 
 **Implicit vs explicit feedback tradeoff** — explicit ratings (BPR) give clean preference signal but are sparse. Implicit feedback (reads via `is_read`) is abundant but noisy. Consider a hybrid: softmax for candidate generation, explicit ratings for a separate ranking stage.
 
