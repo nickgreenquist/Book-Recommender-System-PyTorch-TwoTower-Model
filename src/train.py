@@ -312,7 +312,7 @@ def get_softmax_config() -> dict:
         'item_year_embedding_size':  item_year_embedding_size,
         # Training
         'lr':               0.001,
-        'weight_decay':     1e-4,
+        'weight_decay':     1e-5,   # lighter than BPR (1e-4 was for collapse prevention, not needed with softmax)
         'minibatch_size':   256,    # in-batch negatives: larger batch = more negatives
         'temperature':      0.05,   # softmax temperature (scales logits before cross-entropy)
         'training_steps':   150_000,
@@ -390,6 +390,20 @@ def train_softmax(model: BookRecommender, train_data: tuple, val_data: tuple,
                 scores    = (U @ V.T) / temperature        # (B, B)
                 labels    = torch.arange(len(vidx))
                 val_loss  = F.cross_entropy(scores, labels).item()
+
+                if i == 0:
+                    raw_scores = U @ V.T
+                    print(f"  [logit diagnostics] raw dot products — "
+                          f"mean={raw_scores.mean().item():.3f}  "
+                          f"std={raw_scores.std().item():.3f}  "
+                          f"min={raw_scores.min().item():.3f}  "
+                          f"max={raw_scores.max().item():.3f}")
+                    print(f"  [logit diagnostics] after /temp={temperature} — "
+                          f"mean={scores.mean().item():.3f}  "
+                          f"std={scores.std().item():.3f}  "
+                          f"min={scores.min().item():.3f}  "
+                          f"max={scores.max().item():.3f}")
+                    print(f"  [logit diagnostics] random baseline loss = {np.log(minibatch_size):.4f}")
             avg_train = np.mean(loss_train[i - log_every:i]) if i >= log_every else (loss_train[-1] if loss_train else 0.0)
             elapsed   = time.time() - start
             start     = time.time()

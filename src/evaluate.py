@@ -14,7 +14,7 @@ import torch
 import torch.nn.functional as F
 from src.dataset import FeatureStore
 from src.model import BookRecommender
-from src.train import build_model, get_config, print_model_summary
+from src.train import build_model, get_config, get_softmax_config, print_model_summary
 
 
 # ── Canary user definitions ───────────────────────────────────────────────────
@@ -370,7 +370,7 @@ def probe_genre(model: BookRecommender, genre, book_embeddings: dict,
 
 
 def probe_shelf(model: BookRecommender, shelf_tags: list, book_embeddings: dict,
-                fs: FeatureStore, top_n: int = 10, k_anchors: int = 3) -> None:
+                fs: FeatureStore, top_n: int = 10, k_anchors: int = 5) -> None:
     """
     Find books most similar to a shelf tag query in the item shelf embedding space.
     Finds the top-k_anchors books by raw shelf score, averages their BOOK_SHELF_EMBEDDING
@@ -478,8 +478,11 @@ def probe_similar(book_embeddings: dict, fs: FeatureStore,
 def _resolve_checkpoint(checkpoint_path: str, checkpoint_dir: str):
     if checkpoint_path is not None:
         return checkpoint_path
-    pattern    = os.path.join(checkpoint_dir, 'best_checkpoint_*.pth')
-    candidates = sorted(glob.glob(pattern), key=os.path.getmtime, reverse=True)
+    candidates = sorted(
+        glob.glob(os.path.join(checkpoint_dir, 'best_checkpoint_*.pth')) +
+        glob.glob(os.path.join(checkpoint_dir, 'best_softmax_*.pth')),
+        key=os.path.getmtime, reverse=True
+    )
     if not candidates:
         print("No checkpoint found in saved_models/. Train a model first.")
         return None
@@ -488,7 +491,8 @@ def _resolve_checkpoint(checkpoint_path: str, checkpoint_dir: str):
 
 def _load_model_and_embeddings(checkpoint_path: str, fs):
     """Build model, load weights, pre-compute book embeddings."""
-    config = get_config()
+    basename = os.path.basename(checkpoint_path)
+    config = get_softmax_config() if basename.startswith('best_softmax_') else get_config()
     print(f"Loading checkpoint: {checkpoint_path}")
     state_dict = torch.load(checkpoint_path, weights_only=True)
     model = build_model(config, fs)
@@ -513,8 +517,7 @@ def _load_model_and_embeddings(checkpoint_path: str, fs):
 def run_canary(data_dir: str = 'data', checkpoint_path: str = None,
                version: str = 'v1') -> None:
     from src.dataset import load_features
-    config = get_config()
-    cp = _resolve_checkpoint(checkpoint_path, config['checkpoint_dir'])
+    cp = _resolve_checkpoint(checkpoint_path, 'saved_models')
     if cp is None:
         return
     print("Loading features ...")
@@ -540,8 +543,7 @@ PROBE_SIMILAR_TITLES = [
 def run_probes(data_dir: str = 'data', checkpoint_path: str = None,
                version: str = 'v1') -> None:
     from src.dataset import load_book_features
-    config = get_config()
-    cp = _resolve_checkpoint(checkpoint_path, config['checkpoint_dir'])
+    cp = _resolve_checkpoint(checkpoint_path, 'saved_models')
     if cp is None:
         return
     print("Loading book features ...")

@@ -156,19 +156,21 @@ item_year_embedding_size  = 10
 
 ## Training Details
 
-- **Loss: BPR (Bayesian Personalized Ranking)** — pairwise loss on same-user (liked, disliked) pairs
-  - Positive: debiased rating > 0.5 (roughly rating ≥ 4)
-  - Negative: debiased rating < -0.5 (roughly rating ≤ 2)
-  - Loss = `-logsigmoid(score_pos - score_neg).mean()`
-  - Dramatically better than MSE — prevents embedding collapse, produces semantically structured embeddings
-  - Switch to MSE: set `'loss': 'mse'` in `get_config()`
-- **Optimizer: Adam**, `lr=0.001`, `weight_decay=1e-4`
-- **Batch size**: 64 pairs (each step = 2 forward passes)
+**Primary: In-batch negatives softmax** (`python main.py train softmax`)
+- **Loss**: cross-entropy over in-batch negatives. Each step: B×B score matrix, diagonal = correct targets.
+- **Dataset**: rollback examples — for each read event, context = all prior reads. Up to 10 examples per user sampled randomly. 4.7M train / 526k val examples.
+- **Optimizer**: Adam, `lr=0.001`, `weight_decay=1e-5`
+- **Batch size**: 256 (255 in-batch negatives per example)
+- **Temperature**: 0.05
 - **Steps**: 150,000
-- **Train/val split**: 90% of each user's history as context, 10% as labels (chronological)
-- **Dataset tuple**: 10 elements — indices 0-8 are features/labels, index 9 is `bpr_pairs` LongTensor (N_pairs, 2)
+- **Random baseline loss**: `log(batch_size)` = `log(256)` ≈ 5.545 — confirmed at step 0
+- **Best achieved val loss**: 4.4225 (step 120k of 150k)
+- Val loss has high variance with in-batch negatives (different negatives each eval batch) — ±0.2 oscillation is normal
 
-Note: MSE caused embedding collapse where all item embeddings converged toward the same direction. BPR fixes this by requiring liked books to outscore disliked books, forcing discriminative structure.
+**Legacy: BPR** (`python main.py train`) — kept for reference, not the primary path
+- Pairwise loss on (liked, disliked) pairs. `weight_decay=1e-4`.
+- Produces semantically structured content embeddings but ID embeddings are noise (no cross-book gradient signal).
+- Softmax supersedes BPR: ID embeddings gain structure (King cluster, LOTR cluster confirmed via probe).
 
 ## Canary Users for Eval
 
@@ -205,11 +207,14 @@ Canary users are synthetic — no real read timestamps. All receive `ts_max_bin`
 
 ### Training objective
 
-**Best next step: sampled softmax.** The current BPR model has a fundamental weakness: book ID embeddings are semantically unstructured noise. Probing shows that similar-book retrieval using ID-only embeddings returns random results, while quality comes entirely from content towers (shelf, genre, author, year). This matters because the user tower history-pools over ID embeddings — a weak foundation. Softmax fixes this: each training step forces item ID embedding to score the target book higher than N sampled negatives across the full corpus, giving every item discriminative gradient signal. This is the same reason the movie model's ID embeddings worked better — the genome tag tower is so strong it masked the problem, but the fix is the same regardless.
+**~~Sampled softmax~~** — ✅ Implemented and validated. Softmax is now the primary training path (`python main.py train softmax`). ID embeddings gained semantic structure vs BPR (King/horror cluster, LOTR/fantasy cluster confirmed via probe and canary). Canary results are strong for Literary, NonFiction, Fantasy, Sci-Fi, History, YA. Known weak spots: Horror (no horror genre in vocab — relies purely on shelf signals) and Romance (model conflates literary women's fiction with romance).
 
-1. **Sampled softmax (implicit feedback)** — replace BPR with sampled softmax classification over the book corpus (YouTube DNN, 2016). Frame recommendation as "predict the next book read" rather than "rank liked vs disliked". Use implicit feedback (every read = positive example) with sampled negatives and cross-entropy loss. Yields orders of magnitude more training signal since ratings are sparse but reads are plentiful. At serving time reduces to the same nearest neighbor search in dot product space.
+**Next training improvements:**
+1. **LR schedule** — cosine decay from 0.001→0 over training steps. Train loss plateaued at step ~30k (4.62→4.54 over 120k more steps) suggesting the model is jittering in a basin rather than converging. Adam adapts per-parameter scale but not the global LR ceiling.
+2. **Larger batch** — 512 gives 2× more negatives (511 vs 255), reduces val loss variance, harder task = potentially better gradients.
+3. **Upfront random rollback sampling** — current dataset builder samples K random positions per user upfront (not sequential A→B, AB→C), which is correct. Verify this is in the current dataset.
 
-2. **Implicit vs explicit feedback tradeoff** — explicit ratings (current BPR) give clean preference signal but are sparse. Implicit feedback (reads via `is_read`) is abundant but noisy. Consider a hybrid: use implicit feedback for candidate generation (softmax) and explicit ratings for a separate ranking stage.
+**Implicit vs explicit feedback tradeoff** — explicit ratings (BPR) give clean preference signal but are sparse. Implicit feedback (reads via `is_read`) is abundant but noisy. Consider a hybrid: softmax for candidate generation, explicit ratings for a separate ranking stage.
 
 ### YouTube DNN implementation details (Covington et al., 2016)
 
