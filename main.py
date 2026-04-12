@@ -3,14 +3,17 @@ Book Recommender System — CLI entry point.
 
 Usage:
     python main.py preprocess [books|interactions|split]  # Stage 1: raw JSONs/CSVs → data/base_*.parquet
-    python main.py features            # Stage 2: base parquets → data/features_*.parquet
-    python main.py dataset             # Stage 3: features → data/dataset_*_v1.pt
-    python main.py train               # Stage 4: load datasets, train model, save checkpoint
-    python main.py canary              # Canary user recommendations (most recent checkpoint)
-    python main.py canary <path>       # Canary user recommendations (specific checkpoint)
-    python main.py probe               # Embedding probes (most recent checkpoint)
-    python main.py probe <path>        # Embedding probes (specific checkpoint)
-    python main.py                     # Run all stages in order
+    python main.py features              # Stage 2: base parquets → data/features_*.parquet
+    python main.py dataset               # Stage 3: features → data/dataset_*_v1.pt  (BPR)
+    python main.py dataset softmax       # Stage 3: features + raw → data/dataset_softmax_*_v1.pt
+    python main.py dataset softmax debug # Stage 3: same but 10k users only (fast debug build)
+    python main.py train                 # Stage 4: BPR/MSE training
+    python main.py train softmax         # Stage 4: in-batch negatives softmax training
+    python main.py canary                # Canary user recommendations (most recent checkpoint)
+    python main.py canary <path>         # Canary user recommendations (specific checkpoint)
+    python main.py probe                 # Embedding probes (most recent checkpoint)
+    python main.py probe <path>          # Embedding probes (specific checkpoint)
+    python main.py                       # Run all stages in order (BPR)
 """
 import sys
 
@@ -33,30 +36,56 @@ def cmd_features():
     run(data_dir=DATA_DIR, version=VERSION)
 
 
-def cmd_dataset():
-    from src.dataset import load_features, make_splits, save_splits
+def cmd_dataset(variant=None):
+    if variant in ('softmax', 'softmax debug'):
+        from src.dataset import load_features, make_softmax_splits, save_softmax_splits
 
-    print("Loading features ...")
-    fs = load_features(DATA_DIR, VERSION)
+        debug = (variant == 'softmax debug')
+        print("Loading features ...")
+        fs = load_features(DATA_DIR, VERSION)
 
-    print("\nBuilding datasets ...")
-    train_data, val_data = make_splits(fs)
-    save_splits(train_data, val_data, DATA_DIR, VERSION)
+        print("\nBuilding softmax datasets ...")
+        kwargs = {'max_users': 10_000} if debug else {}
+        train_data, val_data = make_softmax_splits(fs, DATA_DIR, **kwargs)
+        save_softmax_splits(train_data, val_data, DATA_DIR, VERSION)
+    else:
+        from src.dataset import load_features, make_splits, save_splits
+
+        print("Loading features ...")
+        fs = load_features(DATA_DIR, VERSION)
+
+        print("\nBuilding datasets ...")
+        train_data, val_data = make_splits(fs)
+        save_splits(train_data, val_data, DATA_DIR, VERSION)
 
 
-def cmd_train():
-    from src.dataset import load_features, load_splits
-    from src.train import get_config, build_model, train
+def cmd_train(variant=None):
+    if variant == 'softmax':
+        from src.dataset import load_features, load_softmax_splits
+        from src.train import get_softmax_config, build_model, train_softmax
 
-    print("Loading features ...")
-    fs = load_features(DATA_DIR, VERSION)
+        print("Loading features ...")
+        fs = load_features(DATA_DIR, VERSION)
 
-    print("\nLoading datasets ...")
-    train_data, val_data = load_splits(DATA_DIR, VERSION)
+        print("\nLoading softmax datasets ...")
+        train_data, val_data = load_softmax_splits(DATA_DIR, VERSION)
 
-    config = get_config()
-    model  = build_model(config, fs)
-    train(model, train_data, val_data, config, fs)
+        config = get_softmax_config()
+        model  = build_model(config, fs)
+        train_softmax(model, train_data, val_data, config, fs)
+    else:
+        from src.dataset import load_features, load_splits
+        from src.train import get_config, build_model, train
+
+        print("Loading features ...")
+        fs = load_features(DATA_DIR, VERSION)
+
+        print("\nLoading datasets ...")
+        train_data, val_data = load_splits(DATA_DIR, VERSION)
+
+        config = get_config()
+        model  = build_model(config, fs)
+        train(model, train_data, val_data, config, fs)
 
 
 def cmd_canary(checkpoint_path=None):
@@ -98,6 +127,8 @@ if __name__ == '__main__':
     elif args[0] in COMMANDS:
         if args[0] in ('canary', 'probe') and len(args) > 1:
             COMMANDS[args[0]](checkpoint_path=args[1])
+        elif args[0] in ('dataset', 'train') and len(args) > 1:
+            COMMANDS[args[0]](variant=' '.join(args[1:]))
         else:
             COMMANDS[args[0]]()
     else:

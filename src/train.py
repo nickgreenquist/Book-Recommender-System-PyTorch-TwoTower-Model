@@ -1,8 +1,9 @@
 """
-Training loop.
+Training loops: BPR/MSE (train) and in-batch negatives softmax (train_softmax).
 
 Usage:
-    python main.py train
+    python main.py train           # BPR or MSE (set in get_config)
+    python main.py train softmax   # in-batch negatives cross-entropy
 """
 import os
 import time
@@ -280,5 +281,147 @@ def train(model: BookRecommender, train_data: tuple, val_data: tuple,
                 print(f"  → periodic checkpoint → {periodic}")
 
     print(f"\nTraining complete. Best val loss: {best_val_loss:.4f}")
+    print(f"Best checkpoint: {best_path}")
+    return best_path
+
+
+# ── Softmax training (in-batch negatives) ─────────────────────────────────────
+
+def get_softmax_config() -> dict:
+    """Hyperparameters for in-batch negatives softmax training."""
+    item_id_embedding_size    = 40
+    user_genre_embedding_size = 50
+    timestamp_embedding_size  = 10
+    item_genre_embedding_size = 10
+    shelf_embedding_size      = 25
+    author_embedding_size     = 15
+    item_year_embedding_size  = 10
+
+    user_dim = item_id_embedding_size + user_genre_embedding_size + timestamp_embedding_size
+    item_dim = (item_genre_embedding_size + shelf_embedding_size + item_id_embedding_size
+                + author_embedding_size + item_year_embedding_size)
+    assert user_dim == item_dim, f"Tower size mismatch: user={user_dim} item={item_dim}"
+
+    return {
+        'item_id_embedding_size':    item_id_embedding_size,
+        'author_embedding_size':     author_embedding_size,
+        'shelf_embedding_size':      shelf_embedding_size,
+        'user_genre_embedding_size': user_genre_embedding_size,
+        'timestamp_embedding_size':  timestamp_embedding_size,
+        'item_genre_embedding_size': item_genre_embedding_size,
+        'item_year_embedding_size':  item_year_embedding_size,
+        # Training
+        'lr':               0.001,
+        'weight_decay':     1e-4,
+        'minibatch_size':   256,    # in-batch negatives: larger batch = more negatives
+        'temperature':      0.05,   # softmax temperature (scales logits before cross-entropy)
+        'training_steps':   150_000,
+        'log_every':        10_000,
+        'checkpoint_every': 30_000,
+        'checkpoint_dir':   'saved_models',
+    }
+
+
+def train_softmax(model: BookRecommender, train_data: tuple, val_data: tuple,
+                  config: dict, fs: FeatureStore) -> str:
+    """
+    Train with in-batch negatives cross-entropy (softmax).
+
+    train_data / val_data: 8-tuple from dataset.build_softmax_dataset()
+      (X_genre, X_history, X_history_ratings, timestamp,
+       target_book_idx, target_genre, target_year, target_author_idx)
+
+    Each minibatch of size B computes:
+      U = user_embedding(...)         (B, dim)
+      V = item_embedding(...)         (B, dim)
+      scores = U @ V.T / temperature  (B, B)
+      loss   = cross_entropy(scores, arange(B))   target is always on the diagonal
+    """
+    (X_genre_train, X_history_train, X_history_ratings_train, timestamp_train,
+     target_book_idx_train, target_genre_train,
+     target_year_train, target_author_idx_train) = train_data
+
+    (X_genre_val, X_history_val, X_history_ratings_val, timestamp_val,
+     target_book_idx_val, target_genre_val,
+     target_year_val, target_author_idx_val) = val_data
+
+    print_model_summary(model)
+
+    pad_idx          = len(fs.top_books)
+    optimizer        = torch.optim.Adam(model.parameters(), lr=config['lr'],
+                                        weight_decay=config['weight_decay'])
+    minibatch_size   = config['minibatch_size']
+    temperature      = config['temperature']
+    training_steps   = config['training_steps']
+    log_every        = config['log_every']
+    checkpoint_every = config['checkpoint_every']
+    checkpoint_dir   = config['checkpoint_dir']
+
+    n_train = X_genre_train.shape[0]
+    n_val   = X_genre_val.shape[0]
+
+    os.makedirs(checkpoint_dir, exist_ok=True)
+    run_timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    best_val_loss = float('inf')
+    best_path     = os.path.join(checkpoint_dir, f'best_softmax_{run_timestamp}.pth')
+
+    loss_train = []
+
+    print(f"\nStarting softmax training ({training_steps:,} steps, "
+          f"batch={minibatch_size}, temp={temperature}) ...")
+    print(f"  Train: {n_train:,} examples  |  Val: {n_val:,} examples")
+    start = time.time()
+
+    from tqdm import tqdm
+    pbar = tqdm(range(training_steps), desc="Training (softmax)")
+    for i in pbar:
+        is_val = (i % log_every == 0)
+
+        if is_val:
+            model.eval()
+            with torch.no_grad():
+                # Sample a fixed val batch
+                vidx = torch.randint(0, n_val, (minibatch_size,)).tolist()
+                vhp  = pad_history_batch([X_history_val[j] for j in vidx], pad_idx)
+                vrp  = pad_history_ratings_batch([X_history_ratings_val[j] for j in vidx])
+                U = model.user_embedding(X_genre_val[vidx], vhp, vrp, timestamp_val[vidx])
+                V = model.item_embedding(target_genre_val[vidx], target_year_val[vidx],
+                                         target_book_idx_val[vidx], target_author_idx_val[vidx])
+                scores    = (U @ V.T) / temperature        # (B, B)
+                labels    = torch.arange(len(vidx))
+                val_loss  = F.cross_entropy(scores, labels).item()
+            avg_train = np.mean(loss_train[i - log_every:i]) if i >= log_every else (loss_train[-1] if loss_train else 0.0)
+            elapsed   = time.time() - start
+            start     = time.time()
+            pbar.set_postfix(train=f"{avg_train:.4f}", val=f"{val_loss:.4f}")
+            print(f"[{i:06d}]  train_loss={avg_train:.4f}  val_loss={val_loss:.4f}  ({elapsed:.0f}s)")
+
+            if val_loss < best_val_loss:
+                best_val_loss = val_loss
+                torch.save(model.state_dict(), best_path)
+                print(f"  → new best {best_val_loss:.4f} → {best_path}")
+
+            if i > 0 and i % checkpoint_every == 0:
+                periodic = os.path.join(checkpoint_dir,
+                                        f'softmax_{run_timestamp}_step_{i:06d}.pth')
+                torch.save(model.state_dict(), periodic)
+                print(f"  → periodic checkpoint → {periodic}")
+        else:
+            model.train()
+            ix  = torch.randint(0, n_train, (minibatch_size,)).tolist()
+            hp  = pad_history_batch([X_history_train[j] for j in ix], pad_idx)
+            rp  = pad_history_ratings_batch([X_history_ratings_train[j] for j in ix])
+            U   = model.user_embedding(X_genre_train[ix], hp, rp, timestamp_train[ix])
+            V   = model.item_embedding(target_genre_train[ix], target_year_train[ix],
+                                       target_book_idx_train[ix], target_author_idx_train[ix])
+            scores = (U @ V.T) / temperature               # (B, B)
+            labels = torch.arange(len(ix))
+            loss   = F.cross_entropy(scores, labels)
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+            loss_train.append(loss.item())
+
+    print(f"\nSoftmax training complete. Best val loss: {best_val_loss:.4f}")
     print(f"Best checkpoint: {best_path}")
     return best_path

@@ -140,36 +140,42 @@ class BookRecommender(nn.Module):
         elif isinstance(module, nn.Embedding):
             nn.init.xavier_uniform_(module.weight, gain=0.01)
 
-    def forward(self, X_genre, X_history, X_history_ratings, timestamps,
-                target_genre, target_year, target_book_idx, target_author_idx):
+    def user_embedding(self, X_genre, X_history, X_history_ratings, timestamps):
         """
+        Compute user tower embedding.
+
         Args:
-            X_genre              (Tensor): (batch, user_context_size)
-            X_history            (Tensor): (batch, max_hist_len)   padded book_idx
-            X_history_ratings    (Tensor): (batch, max_hist_len)   debiased ratings; 0 at padding
-            timestamps           (Tensor): (batch,)
-            target_genre         (Tensor): (batch, n_genres)
-            target_year          (Tensor): (batch,)
-            target_book_idx      (Tensor): (batch,)
-            target_author_idx    (Tensor): (batch,)
+            X_genre           (Tensor): (batch, user_context_size)
+            X_history         (Tensor): (batch, max_hist_len)  padded book_idx
+            X_history_ratings (Tensor): (batch, max_hist_len)  debiased ratings; 0 at padding
+            timestamps        (Tensor): (batch,)
+        Returns:
+            (batch, user_dim) float tensor
         """
-        pad_mask       = (X_history != self.book_pad_idx).float().unsqueeze(-1)  # (batch, hist, 1)
-        rating_weights = X_history_ratings.unsqueeze(-1) * pad_mask              # (batch, hist, 1)
-        weight_sum     = rating_weights.abs().sum(dim=1).clamp(min=1e-6)         # (batch, 1)
+        pad_mask       = (X_history != self.book_pad_idx).float().unsqueeze(-1)
+        rating_weights = X_history_ratings.unsqueeze(-1) * pad_mask
+        weight_sum     = rating_weights.abs().sum(dim=1).clamp(min=1e-6)
+        history_embs   = self.item_embedding_lookup(X_history)
+        history_emb    = (history_embs * rating_weights).sum(dim=1) / weight_sum
+        genre_emb      = self.user_genre_tower(X_genre)
+        ts_emb         = self.timestamp_embedding_tower(
+                             self.timestamp_embedding_lookup(timestamps))
+        return torch.cat([history_emb, genre_emb, ts_emb], dim=1)
 
-        # ── User: book embedding pool ─────────────────────────────────────────
-        history_embs = self.item_embedding_lookup(X_history)                     # (batch, hist, D)
-        history_emb  = (history_embs * rating_weights).sum(dim=1) / weight_sum   # (batch, D)
+    def item_embedding(self, target_genre, target_year, target_book_idx, target_author_idx):
+        """
+        Compute item tower embedding.
 
-        # ── User: genre and timestamp ─────────────────────────────────────────
-        genre_emb     = self.user_genre_tower(X_genre)
-        ts_emb        = self.timestamp_embedding_tower(
-                            self.timestamp_embedding_lookup(timestamps))
-        user_combined = torch.cat([history_emb, genre_emb, ts_emb], dim=1)
-
-        # ── Item towers ───────────────────────────────────────────────────────
+        Args:
+            target_genre      (Tensor): (batch, n_genres)
+            target_year       (Tensor): (batch,)
+            target_book_idx   (Tensor): (batch,)
+            target_author_idx (Tensor): (batch,)
+        Returns:
+            (batch, item_dim) float tensor
+        """
         item_genre_emb  = self.item_genre_tower(target_genre)
-        item_shelf_vec  = self.book_shelf_matrix[target_book_idx]                # (batch, n_shelves)
+        item_shelf_vec  = self.book_shelf_matrix[target_book_idx]
         item_shelf_emb  = self.item_shelf_tower(item_shelf_vec)
         item_emb        = self.item_embedding_tower(
                               self.item_embedding_lookup(target_book_idx))
@@ -177,8 +183,12 @@ class BookRecommender(nn.Module):
                               self.author_embedding_lookup(target_author_idx))
         year_emb        = self.year_embedding_tower(
                               self.year_embedding_lookup(target_year))
-        item_combined   = torch.cat([item_genre_emb, item_shelf_emb, item_emb,
-                                     item_author_emb, year_emb], dim=1)
+        return torch.cat([item_genre_emb, item_shelf_emb, item_emb,
+                          item_author_emb, year_emb], dim=1)
 
-        # ── Dot product prediction ────────────────────────────────────────────
-        return torch.einsum('ij,ij->i', user_combined, item_combined)
+    def forward(self, X_genre, X_history, X_history_ratings, timestamps,
+                target_genre, target_year, target_book_idx, target_author_idx):
+        """Dot-product score for a (user, item) pair. Used by BPR and MSE training."""
+        user_emb = self.user_embedding(X_genre, X_history, X_history_ratings, timestamps)
+        item_emb = self.item_embedding(target_genre, target_year, target_book_idx, target_author_idx)
+        return torch.einsum('ij,ij->i', user_emb, item_emb)

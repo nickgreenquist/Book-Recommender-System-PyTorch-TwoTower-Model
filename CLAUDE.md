@@ -211,6 +211,40 @@ Canary users are synthetic — no real read timestamps. All receive `ts_max_bin`
 
 2. **Implicit vs explicit feedback tradeoff** — explicit ratings (current BPR) give clean preference signal but are sparse. Implicit feedback (reads via `is_read`) is abundant but noisy. Consider a hybrid: use implicit feedback for candidate generation (softmax) and explicit ratings for a separate ranking stage.
 
+### YouTube DNN implementation details (Covington et al., 2016)
+
+Key design decisions from the paper that directly apply to our softmax implementation:
+
+**Training example construction ("rollback"):**
+- For each read event, use only the user's history *before* that event as context. Predict the *future* read, not a randomly held-out one. This captures asymmetric co-read behavior and prevents leakage of future information.
+- Generate a **fixed number of examples per user** (cap per user). This prevents highly active users from dominating the loss — effectively weights all users equally.
+- **Why rollback for both train and val (not "last read holdout" for val):** Rollback produces examples with varying context lengths (short to long). If val used only each user's last read (full history as context), val examples would always have long contexts while training has short+long — a distribution mismatch that makes val loss unreliable. Using rollback for both keeps context length distribution consistent.
+
+**Negative sampling:**
+- Sample several thousand negatives per step from the background distribution (popularity-proportional, i.e. log-uniform over item frequency). Correct for sampling bias via importance weighting.
+- This gives ~100x speedup over full softmax while maintaining accuracy. Hierarchical softmax is an alternative but Google found it inferior in practice.
+
+**"Example age" feature (skip for books):**
+- The paper feeds `age = t_max - t_read` to correct bias toward older popular videos. For books this doesn't apply — *Crime and Punishment* is as recommendable as a book published last month, and the corpus is essentially static.
+- User recency is already captured by the timestamp embedding (read month bin), which signals how recently the user's taste context was formed.
+
+**Serving (inference):**
+- At serving time, the softmax output layer is not needed. Prediction reduces to **nearest neighbor search in dot product space**: compute the user embedding from their read history, then find the closest item embeddings via ANN (approximate nearest neighbor).
+- Item embeddings (the softmax output weight matrix) are indexed offline. User embeddings are computed on the fly from their history.
+- This is identical to what our current model does — the softmax change doesn't affect the serving architecture.
+
+**Shared item ID embedding:**
+- The item ID embedding table is shared between the item tower output and the user history avg pool (we already do this). The paper does the same — a single global video embedding used for both the "what video is this" tower and the "what has the user watched" history representation.
+
+**Architecture notes:**
+- Hidden layers use **ReLU** (not Tanh). The paper found depth 3 (1024 → 512 → 256 ReLU) best for their scale; for our ~11k book corpus, shallower is fine.
+- The final user embedding dimension = the item embedding dimension (they must match for dot product). The softmax weight matrix is shape `(n_books, embedding_dim)` — each row is an item embedding.
+- Out-of-vocabulary items map to a zero embedding (already our behavior for unknown authors).
+
+**Known approximations in the softmax dataset (dataset.py `build_softmax_dataset`):**
+- Genre context is computed correctly from only the rollback context (no future leakage). ✓
+- `avg_rat` (used for rating debiasing in the history pool) uses the user's full-history average, not the rollback-slice average. Technically it should be recomputed from only the rollback books to avoid any future leakage. Low priority since the average changes slowly and has minor impact.
+
 ### Item features
 
 - **Shelf tower: EmbeddingBag instead of Linear** — v1 uses `nn.Linear(n_shelves, shelf_dim)` which treats the shelf context as a dense vector. But shelf vectors are sparse: preprocessing caps each book at 100 shelves, so median non-zero entries = 92/3032 (~3% density). This is architecturally different from MovieLens genome tags, which are pre-computed ML scores for *every* movie-tag pair (dense). For sparse inputs, `nn.EmbeddingBag` (or `nn.Embedding` + weighted avg pool) is more natural: each shelf gets a learned embedding, and only the book's actual shelves activate and receive gradient. Same parameter count, cleaner gradient flow, more analogous to how book history and author pooling already work.
