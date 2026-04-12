@@ -11,7 +11,9 @@ This is a sibling project to the MovieLens Two-Tower model at:
 
 The architecture follows the same two-tower design but adds an **author embedding tower** not present in the movie model. Preprocessing differs significantly (different schema, two-step streaming pipeline). When in doubt about shared architecture decisions, refer to the movie repo's CLAUDE.md.
 
-**Critical design choice: no user ID embedding.** Users are represented entirely by their taste signals: read history (rating-weighted avg pooling of book embeddings), author affinity (rating-weighted avg pooling of author embeddings), genre affinity, shelf content pooling, and timestamp. Any user can be represented at inference time with just a few books they liked — no retraining required.
+**Critical design choice: no user ID embedding.** Users are represented entirely by their taste signals: read history (rating-weighted avg pooling of book embeddings), genre affinity, and timestamp. Any user can be represented at inference time with just a few books they liked — no retraining required.
+
+**Proven design choice: user tower is intentionally simple.** Shelf and author pooling were removed from the user side after experimentation showed they degraded probe_similar quality — shared towers pulled item embeddings in too many directions during training. Shelf and author signals live only on the item side.
 
 ## Running the Code
 
@@ -88,8 +90,10 @@ Two separate steps — run `preprocess books` first, inspect the corpus size, th
 
 **Genres** (`goodreads_book_genres_initial.json`) — curated high-level labels (e.g. `fiction`, `fantasy, paranormal`, `mystery, thriller, crime`, `romance`) with vote counts per book. Used for the `item_genre_tower`. Weight by vote count when building the genre vector.
 
-**Shelf scores** (`popular_shelves` in `goodreads_books.json`) — list of `{name, count}` objects per book. Granular user-applied labels (e.g. `cozy-mystery`, `dark`, `epic-fantasy`). Used for the `item_shelf_tower` (analogous to movie genome tag tower):
-- Shelf-relevance score = `shelf_count / total_shelf_count_for_book` (0–1)
+**Shelf scores** (`popular_shelves` in `goodreads_books.json`) — list of `{name, count}` objects per book. Granular user-applied labels (e.g. `cozy-mystery`, `dark`, `epic-fantasy`). Used for the `item_shelf_tower`:
+- Shelf-relevance score = TF-IDF: `(shelf_count / total_vocab_shelf_count_for_book) * log(N / df)`
+  - TF normalized over vocab shelves only (intentional — measures relevance within the signal that matters)
+  - IDF suppresses universal shelves like `to-read` (df ≈ N → score ≈ 0), amplifies specific ones like `cozy-mystery`
 - Only shelves appearing `>= MIN_NUM_SHELVES` times across corpus books are kept
 - Stored in `base_book_shelves.parquet`
 
@@ -98,19 +102,17 @@ Two separate steps — run `preprocess books` first, inspect the corpus size, th
 Two-tower design with dot product prediction. Extends the movie model with an **author tower**.
 
 ```
-User Tower:
-  rating_weighted_avg_pool(item_embeddings[read_history])       → history_emb   (item_id_embedding_size)
-  rating_weighted_avg_pool(author_tower(authors[history]))      → author_emb    (author_embedding_size)  [shared tower]
-  rating_weighted_avg_pool(shelf_tower(shelf_ctx[history]))     → shelf_emb     (shelf_embedding_size)   [shared tower]
-  user_genre_tower([avg_rating_per_genre | read_frac])          → genre_emb     (user_genre_embedding_size)
-  timestamp_embedding_tower(read_month)                         → ts_emb        (timestamp_embedding_size)
+User Tower (intentionally simple — no shelf/author pooling):
+  rating_weighted_avg_pool(item_embeddings[read_history])  → history_emb  (item_id_embedding_size)
+  user_genre_tower([avg_rating_per_genre | read_frac])     → genre_emb    (user_genre_embedding_size)
+  timestamp_embedding_tower(read_month)                    → ts_emb       (timestamp_embedding_size)
   concat → user_combined
 
-Item Tower:
-  item_genre_tower(genre_onehot)       → item_genre_emb    (item_genre_embedding_size)
-  item_shelf_tower(shelf_scores)       → item_shelf_emb    (shelf_embedding_size)          [shared with user shelf pool]
-  item_embedding_tower(book_id)        → item_emb          (item_id_embedding_size)        [shared with user history pool]
-  author_tower(author_ids → avg_pool)  → item_author_emb   (author_embedding_size)         [shared with user author pool]
+Item Tower (all content signals):
+  item_genre_tower(genre_weighted)     → item_genre_emb    (item_genre_embedding_size)
+  item_shelf_tower(tfidf_shelf_scores) → item_shelf_emb    (shelf_embedding_size)
+  item_embedding_tower(book_id)        → item_emb          (item_id_embedding_size)   [shared with user history pool]
+  author_tower(primary_author_idx)     → item_author_emb   (author_embedding_size)
   year_embedding_tower(pub_year)       → year_emb          (item_year_embedding_size)
   concat → item_combined
 
@@ -122,8 +124,12 @@ Prediction: dot_product(user_combined, item_combined)
 ### Shared towers
 
 - `item_embedding_tower` — shared between item side and user history avg pool
-- `item_shelf_tower` — shared between item side and user shelf context pool
-- `author_tower` — shared between item side (target book's authors) and user author pool (authors of read history)
+
+### Tower depths
+
+- `item_shelf_tower`: 2-layer MLP (3032 → 128 → 25) — deep because input is sparse (3% density)
+- `user_genre_tower`: 2-layer MLP (2*n_genres → 64 → 50) — deep because combines two signals per genre
+- All other towers: single Linear + Tanh — input dims are small enough that depth doesn't help
 
 ### Author tower details
 
@@ -133,34 +139,36 @@ Prediction: dot_product(user_combined, item_combined)
 - User author affinity = rating-weighted avg pool of primary author embeddings over read history
 - 5,857 unique author vocab entries (including `__unknown__` at index 0) in the 11k-book corpus
 
-### Current embedding sizes (TBD — starting point)
+### Current embedding sizes
 
 ```python
-item_id_embedding_size       = 40   # shared: user history pool + item tower
-author_embedding_size        = 20   # shared: item author + user author pool
-item_year_embedding_size     = 10
-timestamp_embedding_size     = 10
-shelf_embedding_size         = 30   # shared: item shelf tower + user shelf pool
-user_genre_embedding_size    = 30
-item_genre_embedding_size    = 20
+item_id_embedding_size    = 40   # shared: user history pool + item tower
+user_genre_embedding_size = 50
+timestamp_embedding_size  = 10
+item_genre_embedding_size = 10
+shelf_embedding_size      = 25
+author_embedding_size     = 15
+item_year_embedding_size  = 10
 
-# user:  40 + 20 + 30 + 30 + 10  = 130
-# item:  20 + 30 + 40 + 20 + 10  = 120  ✗ — needs rebalancing before first run
+# user: 40 + 50 + 10 = 100
+# item: 10 + 25 + 40 + 15 + 10 = 100 ✓
 ```
-
-Adjust before first training run to satisfy `user_dim == item_dim`.
 
 ## Training Details
 
-Same as movie model to start:
-- Loss: MSE on debiased ratings (raw rating − user mean)
-- Optimizer: SGD, `lr=0.005`, `momentum=0.9`
-- Batch size: 64
-- Steps: 150,000
-- Train/val split: 90% of each user's history as context, 10% as labels (chronological)
+- **Loss: BPR (Bayesian Personalized Ranking)** — pairwise loss on same-user (liked, disliked) pairs
+  - Positive: debiased rating > 0.5 (roughly rating ≥ 4)
+  - Negative: debiased rating < -0.5 (roughly rating ≤ 2)
+  - Loss = `-logsigmoid(score_pos - score_neg).mean()`
+  - Dramatically better than MSE — prevents embedding collapse, produces semantically structured embeddings
+  - Switch to MSE: set `'loss': 'mse'` in `get_config()`
+- **Optimizer: Adam**, `lr=0.001`, `weight_decay=1e-4`
+- **Batch size**: 64 pairs (each step = 2 forward passes)
+- **Steps**: 150,000
+- **Train/val split**: 90% of each user's history as context, 10% as labels (chronological)
+- **Dataset tuple**: 10 elements — indices 0-8 are features/labels, index 9 is `bpr_pairs` LongTensor (N_pairs, 2)
 
-Note: Goodreads ratings skew higher than MovieLens (users tend to rate 3–4 on average).
-Debiasing handles this automatically but val loss may differ from movie model baseline.
+Note: MSE caused embedding collapse where all item embeddings converged toward the same direction. BPR fixes this by requiring liked books to outscore disliked books, forcing discriminative structure.
 
 ## Canary Users for Eval
 
@@ -197,15 +205,17 @@ Canary users are synthetic — no real read timestamps. All receive `ts_max_bin`
 
 ### Training objective
 
-1. **Sampled softmax (implicit feedback)** — replace MSE regression on ratings with sampled softmax classification over the book corpus (YouTube DNN, 2016). Frame recommendation as "predict the next book read" rather than "predict a rating". Use implicit feedback (every read = positive example) with sampled negatives and cross-entropy loss. Yields orders of magnitude more training signal since ratings are sparse but reads are plentiful — especially relevant for Goodreads where many users read without rating. At serving time reduces to the same nearest neighbor search in dot product space.
+**Best next step: sampled softmax.** The current BPR model has a fundamental weakness: book ID embeddings are semantically unstructured noise. Probing shows that similar-book retrieval using ID-only embeddings returns random results, while quality comes entirely from content towers (shelf, genre, author, year). This matters because the user tower history-pools over ID embeddings — a weak foundation. Softmax fixes this: each training step forces item ID embedding to score the target book higher than N sampled negatives across the full corpus, giving every item discriminative gradient signal. This is the same reason the movie model's ID embeddings worked better — the genome tag tower is so strong it masked the problem, but the fix is the same regardless.
 
-2. **Implicit vs explicit feedback tradeoff** — explicit ratings (current) give clean preference signal but are sparse. Implicit feedback (reads via `is_read`) is abundant but noisy. Consider a hybrid: use implicit feedback for candidate generation (softmax) and explicit ratings for a separate ranking stage.
+1. **Sampled softmax (implicit feedback)** — replace BPR with sampled softmax classification over the book corpus (YouTube DNN, 2016). Frame recommendation as "predict the next book read" rather than "rank liked vs disliked". Use implicit feedback (every read = positive example) with sampled negatives and cross-entropy loss. Yields orders of magnitude more training signal since ratings are sparse but reads are plentiful. At serving time reduces to the same nearest neighbor search in dot product space.
+
+2. **Implicit vs explicit feedback tradeoff** — explicit ratings (current BPR) give clean preference signal but are sparse. Implicit feedback (reads via `is_read`) is abundant but noisy. Consider a hybrid: use implicit feedback for candidate generation (softmax) and explicit ratings for a separate ranking stage.
 
 ### Item features
 
 - **Shelf tower: EmbeddingBag instead of Linear** — v1 uses `nn.Linear(n_shelves, shelf_dim)` which treats the shelf context as a dense vector. But shelf vectors are sparse: preprocessing caps each book at 100 shelves, so median non-zero entries = 92/3032 (~3% density). This is architecturally different from MovieLens genome tags, which are pre-computed ML scores for *every* movie-tag pair (dense). For sparse inputs, `nn.EmbeddingBag` (or `nn.Embedding` + weighted avg pool) is more natural: each shelf gets a learned embedding, and only the book's actual shelves activate and receive gradient. Same parameter count, cleaner gradient flow, more analogous to how book history and author pooling already work.
 
-- **Better shelf-relevance scoring (TF-IDF style)** — v1 uses `shelf_count / total_shelf_count_for_book`. Generic shelves like "to-read" and "fiction" score high on nearly every book and carry little information. A better score: `(shelf_count / total_for_book) * log(total_books / books_with_this_shelf)` — suppresses common shelves, amplifies specific ones like "cozy-mystery". Requires per-shelf document frequency computed during `preprocess books`.
+- **~~Better shelf-relevance scoring (TF-IDF style)~~** — ✅ Implemented. See shelf scoring section above.
 
 - **Book description embeddings** — `goodreads_books.json` includes a `description` field. Encoding with a sentence transformer (e.g. `all-MiniLM-L6-v2`) would add dense semantic signal. Skipped in v1 to keep a simple baseline and avoid heavy text encoder dependency.
 

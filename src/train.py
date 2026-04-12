@@ -10,6 +10,7 @@ from datetime import datetime
 
 import numpy as np
 import torch
+import torch.nn.functional as F
 from src.dataset import FeatureStore, pad_history_batch, pad_history_ratings_batch
 from src.model import BookRecommender
 
@@ -55,6 +56,7 @@ def get_config() -> dict:
         'item_genre_embedding_size': item_genre_embedding_size,
         'item_year_embedding_size':  item_year_embedding_size,
         # Training
+        'loss':             'bpr',   # 'mse' or 'bpr'
         'lr':               0.001,
         'weight_decay':     1e-4,
         'minibatch_size':   64,
@@ -141,22 +143,29 @@ def train(model: BookRecommender, train_data: tuple, val_data: tuple,
     """
     Run the training loop. Returns the path of the best checkpoint.
 
-    train_data / val_data: 9-tuple from dataset.build_dataset()
+    train_data / val_data: 10-tuple from dataset.build_dataset()
       (X_genre, X_history, X_history_ratings, timestamp, Y,
-       target_book_idx, target_genre, target_year, target_author_idx)
+       target_book_idx, target_genre, target_year, target_author_idx,
+       bpr_pairs)
     """
+    # [:9] ignores bpr_pairs (index 9) — loaded separately below for BPR
     (X_genre_train, X_history_train, X_history_ratings_train, timestamp_train,
      Y_train, target_book_idx_train, target_genre_train,
-     target_year_train, target_author_idx_train) = train_data
+     target_year_train, target_author_idx_train) = train_data[:9]
 
     (X_genre_val, X_history_val, X_history_ratings_val, timestamp_val,
      Y_val, target_book_idx_val, target_genre_val,
-     target_year_val, target_author_idx_val) = val_data
+     target_year_val, target_author_idx_val) = val_data[:9]
+
+    use_bpr = config.get('loss', 'mse') == 'bpr'
+    if use_bpr:
+        bpr_pairs_train = train_data[9]   # (N_pairs, 2) — same-user (pos_row, neg_row)
+        bpr_pairs_val   = val_data[9]
+        print(f"  BPR mode: {len(bpr_pairs_train):,} train pairs, {len(bpr_pairs_val):,} val pairs")
 
     print_model_summary(model)
 
     pad_idx          = len(fs.top_books)
-    loss_fn          = torch.nn.MSELoss()
     optimizer        = torch.optim.Adam(model.parameters(), lr=config['lr'],
                                         weight_decay=config['weight_decay'])
     minibatch_size   = config['minibatch_size']
@@ -173,7 +182,7 @@ def train(model: BookRecommender, train_data: tuple, val_data: tuple,
     loss_train = []
     loss_val   = []
 
-    print(f"\nStarting training loop  ({training_steps:,} steps) ...")
+    print(f"\nStarting training loop  ({training_steps:,} steps, loss={config.get('loss','mse')}) ...")
     start = time.time()
 
     from tqdm import tqdm
@@ -182,34 +191,70 @@ def train(model: BookRecommender, train_data: tuple, val_data: tuple,
         is_val = (i % log_every == 0)
 
         if is_val:
-            val_batch_size = 1024
-            n_val          = X_genre_val.shape[0]
-            sq_sum         = 0.0
-            n_preds        = 0
             model.eval()
             with torch.no_grad():
-                for v0 in range(0, n_val, val_batch_size):
-                    v1  = min(v0 + val_batch_size, n_val)
-                    vix = list(range(v0, v1))
-                    hb  = pad_history_batch([X_history_val[j] for j in vix], pad_idx)
-                    rb  = pad_history_ratings_batch([X_history_ratings_val[j] for j in vix])
-                    vp  = model(X_genre_val[v0:v1], hb, rb, timestamp_val[v0:v1],
-                                target_genre_val[v0:v1], target_year_val[v0:v1],
-                                target_book_idx_val[v0:v1], target_author_idx_val[v0:v1])
-                    sq_sum  += ((vp - Y_val[v0:v1]) ** 2).sum().item()
-                    n_preds += (v1 - v0)
-            output_val = sq_sum / n_preds
+                if use_bpr:
+                    # Sample a fixed set of val pairs for BPR loss
+                    n_val_pairs  = len(bpr_pairs_val)
+                    sample_size  = min(8192, n_val_pairs)
+                    vidx         = torch.randint(0, n_val_pairs, (sample_size,))
+                    vpi          = bpr_pairs_val[vidx, 0].tolist()
+                    vni          = bpr_pairs_val[vidx, 1].tolist()
+                    vhp = pad_history_batch([X_history_val[j] for j in vpi], pad_idx)
+                    vrp = pad_history_ratings_batch([X_history_ratings_val[j] for j in vpi])
+                    vhn = pad_history_batch([X_history_val[j] for j in vni], pad_idx)
+                    vrn = pad_history_ratings_batch([X_history_ratings_val[j] for j in vni])
+                    sp  = model(X_genre_val[vpi], vhp, vrp, timestamp_val[vpi],
+                                target_genre_val[vpi], target_year_val[vpi],
+                                target_book_idx_val[vpi], target_author_idx_val[vpi])
+                    sn  = model(X_genre_val[vni], vhn, vrn, timestamp_val[vni],
+                                target_genre_val[vni], target_year_val[vni],
+                                target_book_idx_val[vni], target_author_idx_val[vni])
+                    output_val = -F.logsigmoid(sp - sn).mean().item()
+                else:
+                    val_batch_size = 1024
+                    n_val          = X_genre_val.shape[0]
+                    sq_sum         = 0.0
+                    n_preds        = 0
+                    for v0 in range(0, n_val, val_batch_size):
+                        v1  = min(v0 + val_batch_size, n_val)
+                        vix = list(range(v0, v1))
+                        hb  = pad_history_batch([X_history_val[j] for j in vix], pad_idx)
+                        rb  = pad_history_ratings_batch([X_history_ratings_val[j] for j in vix])
+                        vp  = model(X_genre_val[v0:v1], hb, rb, timestamp_val[v0:v1],
+                                    target_genre_val[v0:v1], target_year_val[v0:v1],
+                                    target_book_idx_val[v0:v1], target_author_idx_val[v0:v1])
+                        sq_sum  += ((vp - Y_val[v0:v1]) ** 2).sum().item()
+                        n_preds += (v1 - v0)
+                    output_val = sq_sum / n_preds
             loss_val.append(output_val)
         else:
-            ix         = torch.randint(0, X_genre_train.shape[0], (minibatch_size,)).tolist()
-            hist_batch = pad_history_batch([X_history_train[j] for j in ix], pad_idx)
-            rat_batch  = pad_history_ratings_batch([X_history_ratings_train[j] for j in ix])
             model.train()
-            preds = model(X_genre_train[ix], hist_batch, rat_batch,
-                          timestamp_train[ix],
-                          target_genre_train[ix], target_year_train[ix],
-                          target_book_idx_train[ix], target_author_idx_train[ix])
-            output = loss_fn(preds, Y_train[ix])
+            if use_bpr:
+                n_pairs  = len(bpr_pairs_train)
+                pidx     = torch.randint(0, n_pairs, (minibatch_size,))
+                pi       = bpr_pairs_train[pidx, 0].tolist()
+                ni       = bpr_pairs_train[pidx, 1].tolist()
+                hp = pad_history_batch([X_history_train[j] for j in pi], pad_idx)
+                rp = pad_history_ratings_batch([X_history_ratings_train[j] for j in pi])
+                hn = pad_history_batch([X_history_train[j] for j in ni], pad_idx)
+                rn = pad_history_ratings_batch([X_history_ratings_train[j] for j in ni])
+                sp = model(X_genre_train[pi], hp, rp, timestamp_train[pi],
+                           target_genre_train[pi], target_year_train[pi],
+                           target_book_idx_train[pi], target_author_idx_train[pi])
+                sn = model(X_genre_train[ni], hn, rn, timestamp_train[ni],
+                           target_genre_train[ni], target_year_train[ni],
+                           target_book_idx_train[ni], target_author_idx_train[ni])
+                output = -F.logsigmoid(sp - sn).mean()
+            else:
+                ix         = torch.randint(0, X_genre_train.shape[0], (minibatch_size,)).tolist()
+                hist_batch = pad_history_batch([X_history_train[j] for j in ix], pad_idx)
+                rat_batch  = pad_history_ratings_batch([X_history_ratings_train[j] for j in ix])
+                preds  = model(X_genre_train[ix], hist_batch, rat_batch,
+                               timestamp_train[ix],
+                               target_genre_train[ix], target_year_train[ix],
+                               target_book_idx_train[ix], target_author_idx_train[ix])
+                output = torch.nn.functional.mse_loss(preds, Y_train[ix])
             optimizer.zero_grad()
             output.backward()
             optimizer.step()

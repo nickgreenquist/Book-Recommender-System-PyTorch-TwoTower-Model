@@ -122,7 +122,6 @@ def run_interactions(data_dir: str = 'data') -> None:
     Two-pass stream over goodreads_interactions_dedup.json.gz.
     Requires data/base_books.parquet from run_books().
     Saves base_interactions_raw, base_vocab, base_book_shelves, base_timestamps.
-    Then calls run_split() to produce base_ratings_read, base_ratings_labels.
     """
     base_books_path = os.path.join(data_dir, 'base_books.parquet')
     if not os.path.exists(base_books_path):
@@ -234,8 +233,6 @@ def run_interactions(data_dir: str = 'data') -> None:
     ts_df.to_parquet(os.path.join(data_dir, 'base_timestamps.parquet'), index=False)
 
     print(f"\n✓ Wrote base_interactions_raw, base_vocab, base_book_shelves, base_timestamps  →  {data_dir}/")
-
-    run_split(data_dir)
 
 
 # ── Step 3: Split ─────────────────────────────────────────────────────────────
@@ -364,21 +361,32 @@ def _split_user_history(df: pd.DataFrame, top_books: list) -> tuple:
 # ── Per-book shelf scores helper ─────────────────────────────────────────────
 
 def _build_book_shelf_scores(top_books: list, books: dict, vocab_df: pd.DataFrame) -> pd.DataFrame:
+    import math
     final_shelves = set(vocab_df.loc[vocab_df['type'] == 'shelf', 'value'].tolist())
+    N = len(top_books)
+
+    # Pass 1: document frequency — how many books have each shelf (count > 0)
+    df_count: dict = defaultdict(int)
+    for bid in top_books:
+        for s in books.get(bid, {}).get('popular_shelves', []):
+            if s['name'] in final_shelves and int(s['count']) > 0:
+                df_count[s['name']] += 1
+
+    # Pass 2: TF-IDF scores — TF * log(N / df)
     rows = []
-    for bid in tqdm(top_books, desc="Building book shelf scores"):
+    for bid in tqdm(top_books, desc="Building book shelf scores (TF-IDF)"):
         book = books.get(bid, {})
         raw = {
             s['name']: int(s['count'])
             for s in book.get('popular_shelves', [])
-            if s['name'] in final_shelves
+            if s['name'] in final_shelves and int(s['count']) > 0
         }
         total = sum(raw.values())
         if total == 0:
             rows.append({'book_id': bid, 'shelf_names': [], 'scores': []})
             continue
         names  = list(raw.keys())
-        scores = [raw[n] / total for n in names]
+        scores = [(raw[n] / total) * math.log(N / df_count[n]) for n in names]
         rows.append({'book_id': bid, 'shelf_names': names, 'scores': scores})
     return pd.DataFrame(rows)
 
@@ -396,3 +404,5 @@ def run(data_dir: str = 'data', step: str = None) -> None:
         run_books(data_dir)
         print()
         run_interactions(data_dir)
+        print()
+        run_split(data_dir)

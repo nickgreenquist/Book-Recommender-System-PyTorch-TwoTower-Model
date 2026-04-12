@@ -64,7 +64,7 @@ def build_book_features(base: dict, vocab: dict) -> pd.DataFrame:
       book_id, book_idx, year, genre_context, shelf_context, author_indices
 
     genre_context  — float vector length n_genres, rank-based normalized weights
-    shelf_context  — float vector length n_shelves, normalized shelf scores (count/total)
+    shelf_context  — float vector length n_shelves, TF-IDF shelf scores (count/total * log(N/df))
     author_idx     — int, primary author vocab index; 0 (__unknown__) if no authors
     """
     books_df        = base['books']

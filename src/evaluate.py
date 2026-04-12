@@ -412,57 +412,65 @@ def probe_shelf(model: BookRecommender, shelf_tags: list, book_embeddings: dict,
         if title not in seen_titles:
             seen_titles.add(title)
             marker = " [seed]" if bid in anchor_set else ""
-            print(f"  {sim:.4f}  {title}{marker}")
+            book_genres = ', '.join(fs.bookId_to_genres.get(bid, []))
+            print(f"  {sim:.4f}  {title}{marker}  [{book_genres}]")
 
 
 def probe_similar(book_embeddings: dict, fs: FeatureStore,
                   all_ids: list, all_norm: torch.Tensor,
-                  titles: list, top_n: int = 5) -> None:
+                  titles: list, top_n: int = 5,
+                  all_norm_id: torch.Tensor = None) -> None:
     """
-    For each query title, find the top-N most similar books by cosine similarity
-    on BOOK_EMBEDDING_COMBINED. Uses pre-normalized all_norm matrix from _setup.
+    For each query title, find the top-N most similar books by cosine similarity.
+    Shows results for BOOK_EMBEDDING_COMBINED and optionally BOOK_ID_EMBEDDING side by side.
+    Uses pre-normalized all_norm (and all_norm_id) matrices from _setup.
     """
     TRUNC = 30
 
     def trunc(s: str) -> str:
         return s if len(s) <= TRUNC else s[:TRUNC - 1] + '…'
 
-    rows = []
-    for title in titles:
+    def get_top_n(norm_matrix: torch.Tensor, emb_key: str, title: str) -> list:
         bid = fs.title_to_bookId.get(title)
         if bid is None:
-            rows.append((title, []))
-            continue
-        query   = F.normalize(book_embeddings[bid]['BOOK_EMBEDDING_COMBINED'], dim=1)
-        sims    = (all_norm @ query.T).squeeze(-1)
+            return []
+        query   = F.normalize(book_embeddings[bid][emb_key], dim=1)
+        sims    = (norm_matrix @ query.T).squeeze(-1)
         top_idx = sims.argsort(descending=True)
         results = []
-        seen_titles = {title}  # exclude seed title and all its duplicate editions
+        seen_titles = {title}
         for idx in top_idx:
-            candidate       = all_ids[idx.item()]
-            candidate_title = fs.bookId_to_title[candidate]
+            candidate_title = fs.bookId_to_title[all_ids[idx.item()]]
             if candidate_title in seen_titles:
                 continue
             seen_titles.add(candidate_title)
             results.append(candidate_title)
             if len(results) >= top_n:
                 break
-        rows.append((title, results))
+        return results
 
-    seed_w = max(len(trunc(t)) for t, _ in rows)
-    col_w  = TRUNC
-    header = f"{'Seed':<{seed_w}}" + "".join(f"  {'#'+str(i+1):<{col_w}}" for i in range(top_n))
-    print(f"\n── Most similar books ──")
-    print(header)
-    print('─' * len(header))
-    for title, results in rows:
-        if not results:
-            print(f"{trunc(title):<{seed_w}}  (not in corpus)")
-            continue
-        row = f"{trunc(title):<{seed_w}}"
-        for t in results:
-            row += f"  {trunc(t):<{col_w}}"
-        print(row)
+    def print_table(label: str, rows: list) -> None:
+        seed_w = max(len(trunc(t)) for t, _ in rows)
+        col_w  = TRUNC
+        header = f"{'Seed':<{seed_w}}" + "".join(f"  {'#'+str(i+1):<{col_w}}" for i in range(top_n))
+        print(f"\n── Most similar books ({label}) ──")
+        print(header)
+        print('─' * len(header))
+        for title, results in rows:
+            if not results:
+                print(f"{trunc(title):<{seed_w}}  (not in corpus)")
+                continue
+            row = f"{trunc(title):<{seed_w}}"
+            for t in results:
+                row += f"  {trunc(t):<{col_w}}"
+            print(row)
+
+    combined_rows = [(t, get_top_n(all_norm,    'BOOK_EMBEDDING_COMBINED', t)) for t in titles]
+    print_table('combined embedding', combined_rows)
+
+    if all_norm_id is not None:
+        id_rows = [(t, get_top_n(all_norm_id, 'BOOK_ID_EMBEDDING', t)) for t in titles]
+        print_table('book ID embedding only', id_rows)
 
 
 # ── Setup helpers ─────────────────────────────────────────────────────────────
@@ -492,10 +500,12 @@ def _load_model_and_embeddings(checkpoint_path: str, fs):
     book_embeddings = build_book_embeddings(model, fs)
 
     print("Precomputing embedding matrix ...")
-    all_ids  = list(book_embeddings.keys())
-    all_embs = torch.cat([book_embeddings[bid]['BOOK_EMBEDDING_COMBINED'] for bid in all_ids], dim=0)
-    all_norm = F.normalize(all_embs, dim=1)
-    return model, book_embeddings, all_ids, all_embs, all_norm
+    all_ids     = list(book_embeddings.keys())
+    all_embs    = torch.cat([book_embeddings[bid]['BOOK_EMBEDDING_COMBINED'] for bid in all_ids], dim=0)
+    all_norm    = F.normalize(all_embs, dim=1)
+    all_id_embs = torch.cat([book_embeddings[bid]['BOOK_ID_EMBEDDING'] for bid in all_ids], dim=0)
+    all_norm_id = F.normalize(all_id_embs, dim=1)
+    return model, book_embeddings, all_ids, all_embs, all_norm, all_norm_id
 
 
 # ── Orchestrators ─────────────────────────────────────────────────────────────
@@ -509,7 +519,7 @@ def run_canary(data_dir: str = 'data', checkpoint_path: str = None,
         return
     print("Loading features ...")
     fs = load_features(data_dir, version)
-    model, book_embeddings, all_ids, all_embs, all_norm = _load_model_and_embeddings(cp, fs)
+    model, book_embeddings, all_ids, all_embs, all_norm, all_norm_id = _load_model_and_embeddings(cp, fs)
     print("\n── Canary user evaluation ──")
     run_canary_eval(model, fs, book_embeddings, all_ids, all_embs)
 
@@ -536,7 +546,7 @@ def run_probes(data_dir: str = 'data', checkpoint_path: str = None,
         return
     print("Loading book features ...")
     fs = load_book_features(data_dir, version)
-    model, book_embeddings, all_ids, all_embs, all_norm = _load_model_and_embeddings(cp, fs)
+    model, book_embeddings, all_ids, all_embs, all_norm, all_norm_id = _load_model_and_embeddings(cp, fs)
     print("\n── Embedding probes ──")
     probe_genre(model, 'mystery, thriller, crime', book_embeddings, fs)
     probe_genre(model, 'fantasy, paranormal',      book_embeddings, fs)
@@ -544,4 +554,4 @@ def run_probes(data_dir: str = 'data', checkpoint_path: str = None,
     probe_shelf(model, ['horror', 'scary', 'dark'],          book_embeddings, fs)
     probe_shelf(model, ['science-fiction', 'sci-fi', 'space'], book_embeddings, fs)
     probe_shelf(model, ['epic-fantasy', 'magic', 'world-building'], book_embeddings, fs)
-    probe_similar(book_embeddings, fs, all_ids, all_norm, PROBE_SIMILAR_TITLES)
+    probe_similar(book_embeddings, fs, all_ids, all_norm, PROBE_SIMILAR_TITLES, all_norm_id=all_norm_id)
