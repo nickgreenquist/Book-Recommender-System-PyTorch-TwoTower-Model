@@ -601,10 +601,12 @@ def save_softmax_splits(train_data: tuple, val_data: tuple,
 def load_softmax_splits(data_dir: str = 'data', version: str = 'v1') -> tuple:
     train_path = os.path.join(data_dir, f'dataset_softmax_train_{version}.pt')
     val_path   = os.path.join(data_dir, f'dataset_softmax_val_{version}.pt')
+
     print(f"Loading {train_path} ...")
     train_data = torch.load(train_path, weights_only=False)
     print(f"Loading {val_path} ...")
     val_data   = torch.load(val_path, weights_only=False)
+
     return train_data, val_data
 
 

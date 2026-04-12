@@ -30,22 +30,24 @@ USER_TYPE_TO_FAVORITE_GENRES = {
     'Romance Lover':   ['romance', 'young-adult'],
     'YA Lover':        ['young-adult'],
     'History Lover':   ['history, historical fiction, biography'],
-    'Literary Lover':  ['fiction'],
-    'Horror Lover':    [],  # no horror genre in vocab — relies on shelf tags + books
-    'Sci-Fi Lover':    [],  # no sci-fi genre in vocab — relies on shelf tags + books
-    'NonFiction Lover': ['non-fiction'],
+    'Literary Lover':     ['fiction'],
+    'Horror Lover':       [],  # no horror genre in vocab — relies on shelf tags + books
+    'Sci-Fi Lover':       [],  # no sci-fi genre in vocab — relies on shelf tags + books
+    'NonFiction Lover':   ['non-fiction'],
+    'Libertarian Lover':  ['non-fiction'],
 }
 
 USER_TYPE_TO_WORST_GENRES = {
-    'Mystery Lover':   ['romance', 'young-adult'],
-    'Fantasy Lover':   ['romance', 'non-fiction'],
-    'Romance Lover':   ['mystery, thriller, crime', 'non-fiction'],
-    'YA Lover':        ['non-fiction'],
-    'History Lover':   ['fantasy, paranormal', 'romance'],
-    'Literary Lover':  ['romance', 'young-adult'],
-    'Horror Lover':    ['romance', 'young-adult'],
-    'Sci-Fi Lover':    ['romance', 'young-adult'],
-    'NonFiction Lover': ['fantasy, paranormal', 'romance'],
+    'Mystery Lover':     [],
+    'Fantasy Lover':     [],
+    'Romance Lover':     [],
+    'YA Lover':          [],
+    'History Lover':     [],
+    'Literary Lover':    [],
+    'Horror Lover':      [],
+    'Sci-Fi Lover':      [],
+    'NonFiction Lover':  [],
+    'Libertarian Lover': [],
 }
 
 USER_TYPE_TO_FAVORITE_BOOKS = {
@@ -53,6 +55,7 @@ USER_TYPE_TO_FAVORITE_BOOKS = {
         'Gone Girl',
         'The Girl with the Dragon Tattoo (Millennium, #1)',
         'Big Little Lies',
+        'The Silence of the Lambs  (Hannibal Lecter, #2)',
     ],
     'Fantasy Lover': [
         'The Name of the Wind (The Kingkiller Chronicle, #1)',
@@ -74,14 +77,16 @@ USER_TYPE_TO_FAVORITE_BOOKS = {
         'Wolf Hall (Thomas Cromwell, #1)',
     ],
     'Literary Lover': [
-        'To Kill a Mockingbird',
-        '1984',
-        'The Great Gatsby',
+        'Middlesex',
+        'The Corrections',
+        'Atonement',
+        'Never Let Me Go',
     ],
     'Horror Lover': [
         'It',
         'The Shining',
         'Pet Sematary',
+        'The Exorcist',
     ],
     'Sci-Fi Lover': [
         "Ender's Game (Ender's Saga, #1)",
@@ -92,6 +97,12 @@ USER_TYPE_TO_FAVORITE_BOOKS = {
         'Sapiens: A Brief History of Humankind',
         'Thinking, Fast and Slow',
         'The Power of Habit: Why We Do What We Do in Life and Business',
+    ],
+    'Libertarian Lover': [
+        'The Fountainhead',
+        'Atlas Shrugged',
+        'Anthem',
+        'The Road to Serfdom',
     ],
 }
 
@@ -104,7 +115,8 @@ USER_TYPE_TO_SHELF_TAGS = {
     'Literary Lover':  ['literary-fiction', 'classics', 'literary'],
     'Horror Lover':    ['horror', 'scary', 'dark', 'creepy'],
     'Sci-Fi Lover':    ['science-fiction', 'sci-fi', 'dystopia', 'space'],
-    'NonFiction Lover': ['non-fiction', 'nonfiction', 'science', 'psychology'],
+    'NonFiction Lover':  ['non-fiction', 'nonfiction', 'science', 'psychology'],
+    'Libertarian Lover': ['libertarian', 'politics', 'economics', 'philosophy'],
 }
 
 VALUE_FAVORITE_GENRE_RATING = 4.0

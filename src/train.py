@@ -313,7 +313,7 @@ def get_softmax_config() -> dict:
         # Training
         'lr':               0.001,
         'weight_decay':     1e-5,   # lighter than BPR (1e-4 was for collapse prevention, not needed with softmax)
-        'minibatch_size':   256,    # in-batch negatives: larger batch = more negatives
+        'minibatch_size':   512,    # in-batch negatives: larger batch = more negatives (511 negatives per example)
         'temperature':      0.05,   # softmax temperature (scales logits before cross-entropy)
         'training_steps':   150_000,
         'log_every':        10_000,
@@ -350,9 +350,11 @@ def train_softmax(model: BookRecommender, train_data: tuple, val_data: tuple,
     pad_idx          = len(fs.top_books)
     optimizer        = torch.optim.Adam(model.parameters(), lr=config['lr'],
                                         weight_decay=config['weight_decay'])
+    training_steps   = config['training_steps']
+    scheduler        = torch.optim.lr_scheduler.CosineAnnealingLR(
+                           optimizer, T_max=training_steps, eta_min=0)
     minibatch_size   = config['minibatch_size']
     temperature      = config['temperature']
-    training_steps   = config['training_steps']
     log_every        = config['log_every']
     checkpoint_every = config['checkpoint_every']
     checkpoint_dir   = config['checkpoint_dir']
@@ -394,21 +396,22 @@ def train_softmax(model: BookRecommender, train_data: tuple, val_data: tuple,
                 if i == 0:
                     raw_scores = U @ V.T
                     print(f"  [logit diagnostics] raw dot products — "
-                          f"mean={raw_scores.mean().item():.3f}  "
-                          f"std={raw_scores.std().item():.3f}  "
-                          f"min={raw_scores.min().item():.3f}  "
-                          f"max={raw_scores.max().item():.3f}")
+                          f"mean={raw_scores.mean().item():.6f}  "
+                          f"std={raw_scores.std().item():.6f}  "
+                          f"min={raw_scores.min().item():.6f}  "
+                          f"max={raw_scores.max().item():.6f}")
                     print(f"  [logit diagnostics] after /temp={temperature} — "
-                          f"mean={scores.mean().item():.3f}  "
-                          f"std={scores.std().item():.3f}  "
-                          f"min={scores.min().item():.3f}  "
-                          f"max={scores.max().item():.3f}")
+                          f"mean={scores.mean().item():.6f}  "
+                          f"std={scores.std().item():.6f}  "
+                          f"min={scores.min().item():.6f}  "
+                          f"max={scores.max().item():.6f}")
                     print(f"  [logit diagnostics] random baseline loss = {np.log(minibatch_size):.4f}")
-            avg_train = np.mean(loss_train[i - log_every:i]) if i >= log_every else (loss_train[-1] if loss_train else 0.0)
-            elapsed   = time.time() - start
-            start     = time.time()
+            avg_train  = np.mean(loss_train[i - log_every:i]) if i >= log_every else (loss_train[-1] if loss_train else 0.0)
+            elapsed    = time.time() - start
+            start      = time.time()
+            current_lr = scheduler.get_last_lr()[0] if i > 0 else config['lr']
             pbar.set_postfix(train=f"{avg_train:.4f}", val=f"{val_loss:.4f}")
-            print(f"[{i:06d}]  train_loss={avg_train:.4f}  val_loss={val_loss:.4f}  ({elapsed:.0f}s)")
+            print(f"[{i:06d}]  train_loss={avg_train:.4f}  val_loss={val_loss:.4f}  lr={current_lr:.6f}  ({elapsed:.0f}s)")
 
             if val_loss < best_val_loss:
                 best_val_loss = val_loss
@@ -434,6 +437,7 @@ def train_softmax(model: BookRecommender, train_data: tuple, val_data: tuple,
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
+            scheduler.step()
             loss_train.append(loss.item())
 
     print(f"\nSoftmax training complete. Best val loss: {best_val_loss:.4f}")

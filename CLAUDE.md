@@ -280,3 +280,5 @@ Store `book_shelf_matrix` and `book_author_idx` separately in `feature_store.pt`
 ## Git Workflow
 
 Never commit and push in the same command. Always commit first, then ask before pushing.
+
+For changes that require retraining to validate (hyperparameters, optimizer, scheduler, loss, dataset logic): write the code, then stop. Do not commit until the user has run training and confirmed the results look better.
