@@ -25,6 +25,7 @@ from src.train import build_model, get_config, get_softmax_config, print_model_s
 #   mystery, thriller, crime, non-fiction, poetry, romance, young-adult
 
 USER_TYPE_TO_FAVORITE_GENRES = {
+    "Nick's Recommendations": [''],  # already have extremly rich read history
     'Mystery Lover':   ['mystery, crime'],
     'Fantasy Lover':   ['fantasy'],
     'Romance Lover':   ['romance'],
@@ -41,6 +42,7 @@ USER_TYPE_TO_FAVORITE_GENRES = {
 }
 
 USER_TYPE_TO_WORST_GENRES = {
+    "Nick's Recommendations": [],
     'Mystery Lover':     [],
     'Fantasy Lover':     [],
     'Romance Lover':     [],
@@ -57,6 +59,78 @@ USER_TYPE_TO_WORST_GENRES = {
 }
 
 USER_TYPE_TO_FAVORITE_BOOKS = {
+    "Nick's Recommendations": [
+        'Tales of the South Pacific',
+        'Martin Eden',
+        'The Silmarillion',
+        'Where the Red Fern Grows',
+        'Animal Farm',
+        'White Fang',
+        'The Call of the Wild',
+        'Meditations',
+        'The Return of the King (The Lord of the Rings, #3)',
+        'The Two Towers (The Lord of the Rings, #2)',
+        'The Big Short: Inside the Doomsday Machine',
+        'The Fellowship of the Ring (The Lord of the Rings, #1)',
+        'Flowers for Algernon',
+        'Killers of the Flower Moon: The Osage Murders and the Birth of the FBI',
+        'Einstein: His Life and Universe',
+        "Man's Search for Meaning",
+        'Empire of the Summer Moon: Quanah Parker and the Rise and Fall of the Comanches, the Most Powerful Indian Tribe in American History',
+        'Genghis Khan and the Making of the Modern World',
+        'The Martian',
+        'When Things Fall Apart: Heart Advice for Difficult Times',
+        'Stumbling on Happiness',
+        'Travels with Charley: In Search of America',
+        'Stoner',
+        'Centennial',
+        'All Quiet on the Western Front',
+        'The Things They Carried',
+        'Elon Musk: Tesla, SpaceX, and the Quest for a Fantastic Future',
+        'Hawaii',
+        'Zero to One: Notes on Startups, or How to Build the Future',
+        'Bridge to Terabithia',
+        'Angle of Repose',
+        'Nothing to Envy: Ordinary Lives in North Korea',
+        'Noble House (Asian Saga, #5)',
+        'Shantaram',
+        'First They Killed My Father: A Daughter of Cambodia Remembers',
+        'King Rat (Asian Saga, #4)',
+        'Tai-Pan (Asian Saga, #2)',
+        'Shōgun (Asian Saga, #1)',
+        'The Beach',
+        'The Count of Monte Cristo',
+        'One Up On Wall Street: How to Use What You Already Know to Make Money in the Market',
+        'The Everything Store: Jeff Bezos and the Age of Amazon',
+        'Thinking, Fast and Slow',
+        'The Selfish Gene',
+        "The River of Doubt: Theodore Roosevelt's Darkest Journey",
+        'Steve Jobs',
+        'There are No Children Here: The Story of Two Boys Growing Up in the Other America',
+        'The Subtle Knife (His Dark Materials, #2)',
+        'Talent is Overrated: What Really Separates World-Class Performers from Everybody Else',
+        'East of Eden',
+        'The Perks of Being a Wallflower',
+        'A Short History of Nearly Everything',
+        'The Glass Castle',
+        'From Here to Eternity',
+        'The Book Thief',
+        'The Lord of the Rings (The Lord of the Rings, #1-3)',
+        'Fight Club',
+        'The BFG',
+        'A Storm of Swords (A Song of Ice and Fire, #3)',
+        'A Game of Thrones (A Song of Ice and Fire, #1)',
+        'In Cold Blood',
+        'Siddhartha',
+        'A Farewell to Arms',
+        'Of Mice and Men',
+        'The Kite Runner',
+        'The Catcher in the Rye',
+        'A Clockwork Orange',
+        'The Hunger Games (The Hunger Games, #1)',
+        'The Lightning Thief (Percy Jackson and the Olympians, #1)',
+        "Harry Potter and the Sorcerer's Stone (Harry Potter, #1)",
+    ],
     'Mystery Lover': [
         'Gone Girl',
         'The Girl with the Dragon Tattoo (Millennium, #1)',
@@ -129,6 +203,7 @@ USER_TYPE_TO_FAVORITE_BOOKS = {
 }
 
 USER_TYPE_TO_SHELF_TAGS = {
+    "Nick's Recommendations": [''],  # read history is rich enough
     'Mystery Lover':   ['mystery', 'crime'],
     'Fantasy Lover':   ['epic-fantasy', 'world-building'],
     'Romance Lover':   ['romance', 'love-story', 'chick-lit'],
@@ -333,10 +408,11 @@ def run_canary_eval(model: BookRecommender, fs: FeatureStore,
             raw_scores = (all_embs @ user_emb.T).squeeze(-1)
             scores     = {all_ids[i]: raw_scores[i].item() for i in range(len(all_ids))}
 
+            n = 20 if user_type == "Nick's Recommendations" else top_n
             recs       = []
             seen_titles = set(exclude_set)
             for bid, _ in sorted(scores.items(), key=lambda x: x[1], reverse=True):
-                if len(recs) >= top_n:
+                if len(recs) >= n:
                     break
                 title = fs.bookId_to_title[bid]
                 if title not in seen_titles:
