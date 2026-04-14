@@ -36,6 +36,8 @@ USER_TYPE_TO_FAVORITE_GENRES = {
     'NonFiction Lover':   ['non-fiction'],
     'Economics Lover':  [''],
     'Manga Lover':      [],  # no manga genre in vocab — relies on shelf tags + books
+    'Poetry Lover':     ['poetry'],
+    "Children's Book Lover": ['children'],
 }
 
 USER_TYPE_TO_WORST_GENRES = {
@@ -50,6 +52,8 @@ USER_TYPE_TO_WORST_GENRES = {
     'NonFiction Lover':  [],
     'Economics Lover': [],
     'Manga Lover':     [],
+    'Poetry Lover':    [],
+    "Children's Book Lover": [],
 }
 
 USER_TYPE_TO_FAVORITE_BOOKS = {
@@ -85,15 +89,15 @@ USER_TYPE_TO_FAVORITE_BOOKS = {
         'Moby-Dick or, The Whale',
     ],
     'Horror Lover': [
-        'It',
         'The Shining',
         'Pet Sematary',
         'The Exorcist',
+        'House of Leaves',
+        'The Haunting of Hill House',
     ],
     'Sci-Fi Lover': [
-        "Ender's Game (Ender's Saga, #1)",
+        'Hyperion (Hyperion Cantos, #1)',
         "The Hitchhiker's Guide to the Galaxy (Hitchhiker's Guide, #1)",
-        'Fahrenheit 451',
     ],
     'NonFiction Lover': [
         'Sapiens: A Brief History of Humankind',
@@ -110,6 +114,18 @@ USER_TYPE_TO_FAVORITE_BOOKS = {
         'Naruto, Vol. 01: The Tests of the Ninja (Naruto, #1)',
         'Bleach, Volume 01',
     ],
+    'Poetry Lover': [
+        'Leaves of Grass',
+        'The Complete Poems of Emily Dickinson',
+        'The Essential Rumi',
+        'Milk and Honey',
+    ],
+    "Children's Book Lover": [
+        'Where the Wild Things Are',
+        'The Giving Tree',
+        'Where the Sidewalk Ends',
+        'Matilda',
+    ],
 }
 
 USER_TYPE_TO_SHELF_TAGS = {
@@ -124,6 +140,8 @@ USER_TYPE_TO_SHELF_TAGS = {
     'NonFiction Lover':  ['non-fiction'],
     'Economics Lover': ['economics'],
     'Manga Lover':     [''],
+    'Poetry Lover':    ['poetry'],
+    "Children's Book Lover": ['childrens', 'children-s', 'picture-books'],
 }
 
 VALUE_FAVORITE_GENRE_RATING = 4.0

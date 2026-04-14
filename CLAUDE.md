@@ -209,6 +209,8 @@ Canary users are synthetic — no real read timestamps. All receive `ts_max_bin`
 
 **~~Sampled softmax~~** — ✅ Implemented and validated. Softmax is now the primary training path (`python main.py train softmax`). ID embeddings gained semantic structure vs BPR (King/horror cluster, LOTR/fantasy cluster confirmed via probe and canary). Canary results are strong for Literary, NonFiction, Fantasy, Sci-Fi, History, YA. Known weak spots: Horror (no horror genre in vocab — relies purely on shelf signals) and Romance (model conflates literary women's fiction with romance).
 
+**⚠️ Retraining required:** The year feature vocab changed — `preprocess books` was updated to use original publication year (from `goodreads_book_works.json`) instead of edition year. Year vocab indices are now different from the current checkpoint. The serving app displays correct years (from `bookId_to_year` in the feature store, not the model), but year embedding quality will be degraded until the model is retrained from scratch (`python main.py features && python main.py dataset softmax && python main.py train softmax`).
+
 **Next training improvements:**
 1. **~~LR schedule~~** — ✅ Implemented. CosineAnnealingLR from 0.001→0 over training steps. Eliminated the early plateau seen in the first softmax run.
 2. **~~Larger batch~~** — ✅ 512 (511 in-batch negatives). Confirmed better drop-from-baseline than batch=256.

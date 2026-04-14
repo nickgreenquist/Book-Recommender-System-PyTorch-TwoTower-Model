@@ -13,6 +13,8 @@ Usage:
     python main.py canary <path>         # Canary user recommendations (specific checkpoint)
     python main.py probe                 # Embedding probes (most recent checkpoint)
     python main.py probe <path>          # Embedding probes (specific checkpoint)
+    python main.py export                # Stage 5: export serving artifacts to serving/
+    python main.py export <path>         # Stage 5: export from specific checkpoint
     python main.py                       # Run all stages in order (BPR)
 """
 import sys
@@ -88,6 +90,11 @@ def cmd_train(variant=None):
         train(model, train_data, val_data, config, fs)
 
 
+def cmd_export(checkpoint_path=None):
+    from src.export import run_export
+    run_export(data_dir=DATA_DIR, checkpoint_path=checkpoint_path, version=VERSION)
+
+
 def cmd_canary(checkpoint_path=None):
     from src.evaluate import run_canary
     run_canary(data_dir=DATA_DIR, checkpoint_path=checkpoint_path, version=VERSION)
@@ -106,6 +113,7 @@ COMMANDS = {
     'train':      cmd_train,
     'canary':     cmd_canary,
     'probe':      cmd_probe,
+    'export':     cmd_export,
 }
 
 if __name__ == '__main__':
@@ -125,7 +133,7 @@ if __name__ == '__main__':
             sys.exit(1)
         cmd_preprocess(step=step)
     elif args[0] in COMMANDS:
-        if args[0] in ('canary', 'probe') and len(args) > 1:
+        if args[0] in ('canary', 'probe', 'export') and len(args) > 1:
             COMMANDS[args[0]](checkpoint_path=args[1])
         elif args[0] in ('dataset', 'train') and len(args) > 1:
             COMMANDS[args[0]](variant=' '.join(args[1:]))

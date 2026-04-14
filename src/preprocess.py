@@ -60,6 +60,8 @@ def run_books(data_dir: str = 'data') -> None:
     """
     Stream goodreads_books.json and goodreads_book_genres_initial.json.
     Filter to books with ratings_count >= MIN_RATINGS_PER_BOOK.
+    Uses goodreads_book_works.json for original publication year (not edition year).
+    Uses goodreads_book_authors.json for primary author name.
     Saves data/base_books.parquet.
     """
     os.makedirs(data_dir, exist_ok=True)
@@ -72,6 +74,38 @@ def run_books(data_dir: str = 'data') -> None:
             rec = json.loads(line)
             genres[rec['book_id']] = rec.get('genres', {})
     print(f"  Loaded genres for {len(genres):,} books")
+
+    # Load original publication years from works (work_id → original_publication_year)
+    work_pub_year: dict = {}
+    works_path = os.path.join(data_dir, 'goodreads_book_works.json')
+    if os.path.exists(works_path):
+        print("\nLoading goodreads_book_works.json ...")
+        with open(works_path) as f:
+            for line in f:
+                rec = json.loads(line)
+                wid = rec.get('work_id', '')
+                yr  = rec.get('original_publication_year', '')
+                if wid and yr:
+                    work_pub_year[wid] = str(yr)
+        print(f"  Loaded original pub years for {len(work_pub_year):,} works")
+    else:
+        print("\nWarning: goodreads_book_works.json not found — falling back to edition year")
+
+    # Load author names
+    author_names: dict = {}
+    authors_path = os.path.join(data_dir, 'goodreads_book_authors.json')
+    if os.path.exists(authors_path):
+        print("\nLoading goodreads_book_authors.json ...")
+        with open(authors_path) as f:
+            for line in f:
+                rec = json.loads(line)
+                aid = rec.get('author_id', '')
+                name = rec.get('name', '')
+                if aid and name:
+                    author_names[aid] = name
+        print(f"  Loaded names for {len(author_names):,} authors")
+    else:
+        print("\nWarning: goodreads_book_authors.json not found — primary_author will be empty")
 
     # Stream books, filter by ratings_count
     print("\nStreaming goodreads_books.json ...")
@@ -94,12 +128,17 @@ def run_books(data_dir: str = 'data') -> None:
             genre_votes = genres.get(bid, {})
             genre_list = sorted(genre_votes, key=lambda g: -genre_votes[g]) if genre_votes else ['unknown']
             author_ids = [a['author_id'] for a in b.get('authors', []) if a.get('author_id')]
+            primary_author = author_names.get(author_ids[0], '') if author_ids else ''
+            # Prefer original publication year from works; fall back to edition year
+            wid  = b.get('work_id', '')
+            year = work_pub_year.get(wid) or str(b.get('publication_year', '') or '-1')
             rows.append({
                 'book_id':          bid,
                 'title':            b.get('title', ''),
-                'year':             str(b.get('publication_year', '') or '-1'),
+                'year':             year,
                 'genres':           genre_list,
                 'author_ids':       author_ids,
+                'primary_author':   primary_author,
                 'ratings_count':    rc,
                 'popular_shelves':  b.get('popular_shelves', []),
             })
