@@ -25,16 +25,17 @@ from src.train import build_model, get_config, get_softmax_config, print_model_s
 #   mystery, thriller, crime, non-fiction, poetry, romance, young-adult
 
 USER_TYPE_TO_FAVORITE_GENRES = {
-    'Mystery Lover':   ['mystery, thriller, crime'],
-    'Fantasy Lover':   ['fantasy, paranormal'],
-    'Romance Lover':   ['romance', 'young-adult'],
+    'Mystery Lover':   ['mystery, crime'],
+    'Fantasy Lover':   ['fantasy'],
+    'Romance Lover':   ['romance'],
     'YA Lover':        ['young-adult'],
-    'History Lover':   ['history, historical fiction, biography'],
-    'Literary Lover':     ['fiction'],
+    'History Lover':   ['history, biography'],
+    'Classic Lover':     [''],
     'Horror Lover':       [],  # no horror genre in vocab — relies on shelf tags + books
     'Sci-Fi Lover':       [],  # no sci-fi genre in vocab — relies on shelf tags + books
     'NonFiction Lover':   ['non-fiction'],
-    'Libertarian Lover':  ['non-fiction'],
+    'Economics Lover':  [''],
+    'Manga Lover':      [],  # no manga genre in vocab — relies on shelf tags + books
 }
 
 USER_TYPE_TO_WORST_GENRES = {
@@ -43,11 +44,12 @@ USER_TYPE_TO_WORST_GENRES = {
     'Romance Lover':     [],
     'YA Lover':          [],
     'History Lover':     [],
-    'Literary Lover':    [],
+    'Classic Lover':    [],
     'Horror Lover':      [],
     'Sci-Fi Lover':      [],
     'NonFiction Lover':  [],
-    'Libertarian Lover': [],
+    'Economics Lover': [],
+    'Manga Lover':     [],
 }
 
 USER_TYPE_TO_FAVORITE_BOOKS = {
@@ -76,11 +78,11 @@ USER_TYPE_TO_FAVORITE_BOOKS = {
         'The Pillars of the Earth (Kingsbridge, #1)',
         'Wolf Hall (Thomas Cromwell, #1)',
     ],
-    'Literary Lover': [
-        'Middlesex',
-        'The Corrections',
-        'Atonement',
-        'Never Let Me Go',
+    'Classic Lover': [
+        'Anna Karenina',
+        'Crime and Punishment',
+        'Great Expectations',
+        'Moby-Dick or, The Whale',
     ],
     'Horror Lover': [
         'It',
@@ -96,27 +98,32 @@ USER_TYPE_TO_FAVORITE_BOOKS = {
     'NonFiction Lover': [
         'Sapiens: A Brief History of Humankind',
         'Thinking, Fast and Slow',
-        'The Power of Habit: Why We Do What We Do in Life and Business',
     ],
-    'Libertarian Lover': [
-        'The Fountainhead',
-        'Atlas Shrugged',
-        'Anthem',
-        'The Road to Serfdom',
+    'Economics Lover': [
+        'The Intelligent Investor',
+        'The Wealth of Nations',
+        'Capital in the Twenty-First Century',
+    ],
+    'Manga Lover': [
+        'Fullmetal Alchemist, Vol. 1 (Fullmetal Alchemist, #1)',
+        'Death Note, Vol. 2: Confluence (Death Note, #2)',
+        'Naruto, Vol. 01: The Tests of the Ninja (Naruto, #1)',
+        'Bleach, Volume 01',
     ],
 }
 
 USER_TYPE_TO_SHELF_TAGS = {
-    'Mystery Lover':   ['mystery', 'thriller', 'suspense', 'crime'],
-    'Fantasy Lover':   ['fantasy', 'magic', 'epic-fantasy', 'world-building'],
+    'Mystery Lover':   ['mystery', 'crime'],
+    'Fantasy Lover':   ['epic-fantasy', 'world-building'],
     'Romance Lover':   ['romance', 'love-story', 'chick-lit'],
     'YA Lover':        ['young-adult', 'ya', 'coming-of-age'],
-    'History Lover':   ['historical-fiction', 'history', 'historical'],
-    'Literary Lover':  ['literary-fiction', 'classics', 'literary'],
-    'Horror Lover':    ['horror', 'scary', 'dark', 'creepy'],
-    'Sci-Fi Lover':    ['science-fiction', 'sci-fi', 'dystopia', 'space'],
-    'NonFiction Lover':  ['non-fiction', 'nonfiction', 'science', 'psychology'],
-    'Libertarian Lover': ['libertarian', 'politics', 'economics', 'philosophy'],
+    'History Lover':   ['history', 'historical'],
+    'Classic Lover':  ['classics'],
+    'Horror Lover':    ['horror'],
+    'Sci-Fi Lover':    ['science-fiction', 'sci-fi'],
+    'NonFiction Lover':  ['non-fiction'],
+    'Economics Lover': ['economics'],
+    'Manga Lover':     [''],
 }
 
 VALUE_FAVORITE_GENRE_RATING = 4.0
@@ -331,6 +338,11 @@ def run_canary_eval(model: BookRecommender, fs: FeatureStore,
             print(f"\n{'═' * bar_w}")
             print(title_line)
             print(f"{'═' * bar_w}")
+            if anchor_titles:
+                print(f"Shelf anchors (rating={VALUE_ANCHOR_BOOK_RATING}):")
+                for t in anchor_titles:
+                    print(f"  + {t}")
+                print('─' * bar_w)
             header = f"{'Favorite Books':<{col_w}}  Recommendations"
             print(header)
             print('─' * bar_w)
