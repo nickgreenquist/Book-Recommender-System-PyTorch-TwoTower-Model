@@ -543,7 +543,8 @@ model, fs, be, all_ids, all_embs, all_norm, ts_inference = load_artifacts()
 st.markdown(
     "<small>Two-Tower neural network · Built with "
     "<a href='https://mengtingwan.github.io/data/goodreads.html' target='_blank'>Goodreads</a>"
-    " and <a href='https://pytorch.org' target='_blank'>PyTorch</a></small>",
+    " and <a href='https://pytorch.org' target='_blank'>PyTorch</a><br>"
+    "Code: <a href='https://github.com/nickgreenquist/Book-Recommender-System-PyTorch-TwoTower-Model' target='_blank'>GitHub</a></small>",
     unsafe_allow_html=True,
 )
 
