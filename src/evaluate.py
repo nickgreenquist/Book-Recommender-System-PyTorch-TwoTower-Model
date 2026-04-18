@@ -202,6 +202,139 @@ USER_TYPE_TO_FAVORITE_BOOKS = {
     ],
 }
 
+USER_TYPE_TO_LIKED_BOOKS = {
+    "Nick's Recommendations": [
+        'To Have and Have Not',
+        'Tortilla Flat',
+        'Crime and Punishment',
+        'A Christmas Carol',
+        'Show Your Work!: 10 Ways to Share Your Creativity and Get Discovered',
+        'The Untethered Soul: The Journey Beyond Yourself',
+        'The Wright Brothers',
+        'Deep Work: Rules for Focused Success in a Distracted World',
+        'Hiroshima',
+        'And Then There Were None',
+        'Station Eleven',
+        'At Home: A Short History of Private Life',
+        'Rich Dad, Poor Dad',
+        'The Picture of Dorian Gray',
+        'Behind the Beautiful Forevers: Life, Death, and Hope in a Mumbai Undercity',
+        "Endurance: Shackleton's Incredible Voyage",
+        'Vagabonding: An Uncommon Guide to the Art of Long-Term World Travel',
+        'The Poisonwood Bible',
+        'The 48 Laws of Power',
+        'The Information: A History, a Theory, a Flood',
+        'On the Road',
+        'Astrophysics for People in a Hurry',
+        'The Idiot',
+        'Casino Royale (James Bond, #1)',
+        'In a Sunburned Country',
+        'Breakfast of Champions',
+        'The English Patient',
+        'Norse Mythology',
+        'Down and Out in Paris and London',
+        'The Sun Also Rises',
+        'Delivering Happiness: A Path to Profits, Passion, and Purpose',
+        'In the Heart of the Sea: The Tragedy of the Whaleship Essex',
+        'The Joy Luck Club',
+        'Benjamin Franklin: An American Life',
+        'The Curious Case of Benjamin Button',
+        'A Gentleman in Moscow',
+        'The Grapes of Wrath',
+        'The Subtle Art of Not Giving a F*ck: A Counterintuitive Approach to Living a Good Life',
+        'Unaccustomed Earth',
+        'In the Plex: How Google Thinks, Works, and Shapes Our Lives',
+        'Creativity, Inc.: Overcoming the Unseen Forces That Stand in the Way of True Inspiration',
+        'Charlie and the Great Glass Elevator (Charlie Bucket, #2)',
+        'Sapiens: A Brief History of Humankind',
+        'Hillbilly Elegy: A Memoir of a Family and Culture in Crisis',
+        'Fahrenheit 451',
+        'Watchmen',
+        'The One Thing: The Surprisingly Simple Truth Behind Extraordinary Results',
+        'The Old Man and the Sea',
+        'The Undoing Project: A Friendship That Changed Our Minds',
+        'Watership Down (Watership Down, #1)',
+        'The Design of Everyday Things',
+        'No Country for Old Men',
+        'Middlesex',
+        "The Girl in the Spider's Web (Millennium, #4)",
+        'The Art of War',
+        'Anna Karenina',
+        'The Children of Húrin',
+        'The Amber Spyglass (His Dark Materials, #3)',
+        'The Golden Compass (His Dark Materials, #1)',
+        'Looking for Alaska',
+        'The Road to Character',
+        'The Road',
+        'Murder on the Orient Express (Hercule Poirot, #10)',
+        'The Alchemist',
+        'Catching Fire (The Hunger Games, #2)',
+        "Hatchet (Brian's Saga, #1)",
+        'Charlie and the Chocolate Factory (Charlie Bucket, #1)',
+        'A Thousand Splendid Suns',
+        'A Long Way Gone: Memoirs of a Boy Soldier',
+        'Eleanor & Park',
+        'Divergent (Divergent, #1)',
+        'Son (The Giver, #4)',
+        'Messenger (The Giver, #3)',
+        'Gathering Blue (The Giver, #2)',
+        'The Giver (The Giver, #1)',
+        'Fifty Shades of Grey (Fifty Shades, #1)',
+        'The Fault in Our Stars',
+        'The Brothers Karamazov',
+        'The Adventures of Captain Underpants (Captain Underpants, #1)',
+        'A Brief History of Time',
+        'The Bad Beginning (A Series of Unfortunate Events, #1)',
+        'The Thief Lord',
+        'To Kill a Mockingbird',
+        'The Great Gatsby',
+        'Harry Potter and the Chamber of Secrets (Harry Potter, #2)',
+        'Harry Potter and the Deathly Hallows (Harry Potter, #7)',
+        'Shiloh (Shiloh, #1)',
+        'Holes (Holes, #1)',
+        'The Outsiders',
+        'Captain Underpants and the Attack of the Talking Toilets (Captain Underpants, #2)',
+        'The War of the Worlds',
+        "The Innovator's Dilemma: The Revolutionary Book that Will Change the Way You Do Business",
+        'Lone Survivor: The Eyewitness Account of Operation Redwing and the Lost Heroes of SEAL Team 10',
+        'Killing Lincoln: The Shocking Assassination that Changed America Forever',
+        "A Connecticut Yankee in King Arthur's Court",
+        'The Prince and the Pauper',
+        'Redwall (Redwall, #1)',
+        'Twenty Thousand Leagues Under the Sea',
+        'A Dance with Dragons (A Song of Ice and Fire, #5)',
+        'A Clash of Kings  (A Song of Ice and Fire, #2)',
+        'Outliers: The Story of Success',
+        'Blink: The Power of Thinking Without Thinking',
+        'SuperFreakonomics: Global Cooling, Patriotic Prostitutes And Why Suicide Bombers Should Buy Life Insurance',
+        'The Tipping Point: How Little Things Can Make a Big Difference',
+        'Great Expectations',
+        'Frankenstein',
+        'Animal Farm',
+        'Hamlet: Screenplay, Introduction And Film Diary',
+        'Romeo and Juliet',
+        'Inkheart (Inkworld, #1)',
+        'Artemis Fowl (Artemis Fowl, #1)',
+        'Mossflower (Redwall, #2)',
+        'The Son of Neptune (The Heroes of Olympus, #2)',
+        'The Lost Hero (The Heroes of Olympus, #1)',
+        'The Battle of the Labyrinth (Percy Jackson and the Olympians, #4)',
+    ],
+    'Mystery Lover':          [],
+    'Fantasy Lover':          [],
+    'Romance Lover':          [],
+    'YA Lover':               [],
+    'History Lover':          [],
+    'Classic Lover':          [],
+    'Horror Lover':           [],
+    'Sci-Fi Lover':           [],
+    'NonFiction Lover':       [],
+    'Economics Lover':        [],
+    'Manga Lover':            [],
+    'Poetry Lover':           [],
+    "Children's Book Lover":  [],
+}
+
 USER_TYPE_TO_SHELF_TAGS = {
     "Nick's Recommendations": [''],  # read history is rich enough
     'Mystery Lover':   ['mystery', 'crime'],
@@ -322,10 +455,13 @@ def _build_user_embedding(model: BookRecommender, fs: FeatureStore, user_type: s
     fav_books    = USER_TYPE_TO_FAVORITE_BOOKS[user_type]
     shelf_tags   = USER_TYPE_TO_SHELF_TAGS.get(user_type, [])
 
-    anchor_titles = _get_anchor_titles(fs, shelf_tags, exclude=set(fav_books))
+    liked_books   = USER_TYPE_TO_LIKED_BOOKS.get(user_type, [])
+    anchor_titles = _get_anchor_titles(fs, shelf_tags,
+                                       exclude=set(fav_books) | set(liked_books))
 
     liked_with_weights = (
-        [(t, VALUE_FAVORITE_BOOK_RATING) for t in fav_books] +
+        [(t, VALUE_FAVORITE_BOOK_RATING) for t in fav_books]   +
+        [(t, VALUE_ANCHOR_BOOK_RATING)   for t in liked_books] +
         [(t, VALUE_ANCHOR_BOOK_RATING)   for t in anchor_titles]
     )
 
@@ -400,10 +536,12 @@ def run_canary_eval(model: BookRecommender, fs: FeatureStore,
     with torch.no_grad():
         for user_type in USER_TYPE_TO_FAVORITE_GENRES:
             user_emb   = _build_user_embedding(model, fs, user_type, ts_max_bin)
-            fav_books  = USER_TYPE_TO_FAVORITE_BOOKS[user_type]
-            shelf_tags = USER_TYPE_TO_SHELF_TAGS.get(user_type, [])
-            anchor_titles = _get_anchor_titles(fs, shelf_tags, exclude=set(fav_books))
-            exclude_set   = set(fav_books) | set(anchor_titles)
+            fav_books   = USER_TYPE_TO_FAVORITE_BOOKS[user_type]
+            liked_books = USER_TYPE_TO_LIKED_BOOKS.get(user_type, [])
+            shelf_tags  = USER_TYPE_TO_SHELF_TAGS.get(user_type, [])
+            anchor_titles = _get_anchor_titles(
+                fs, shelf_tags, exclude=set(fav_books) | set(liked_books))
+            exclude_set   = set(fav_books) | set(liked_books) | set(anchor_titles)
 
             raw_scores = (all_embs @ user_emb.T).squeeze(-1)
             scores     = {all_ids[i]: raw_scores[i].item() for i in range(len(all_ids))}

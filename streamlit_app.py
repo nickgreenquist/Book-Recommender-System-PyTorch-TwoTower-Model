@@ -22,6 +22,7 @@ from src.evaluate import (
     USER_TYPE_TO_FAVORITE_GENRES,
     USER_TYPE_TO_WORST_GENRES,
     USER_TYPE_TO_FAVORITE_BOOKS,
+    USER_TYPE_TO_LIKED_BOOKS,
     USER_TYPE_TO_SHELF_TAGS,
     VALUE_FAVORITE_BOOK_RATING,
     VALUE_ANCHOR_BOOK_RATING,
@@ -33,6 +34,9 @@ _LIKED_BOOK  = VALUE_FAVORITE_BOOK_RATING   # 2.0
 _ANCHOR_BOOK = VALUE_ANCHOR_BOOK_RATING     # 1.0
 _LIKED_GENRE = VALUE_FAVORITE_GENRE_RATING  # 4.0
 _ANCHORS_PER_TAG = 5
+_COVER_WIDTH = 100
+_COVER_ROW_HEIGHT = 200
+
 
 
 # ── Startup ───────────────────────────────────────────────────────────────────
@@ -167,6 +171,14 @@ def _build_user_embedding(model, fs, liked_titles_with_weights, liked_genres, ts
     return torch.cat([history_emb, genre_emb, ts_emb], dim=1)
 
 
+def _cover_url(bid, fs):
+    """Return Open Library cover URL for a book, or None if no ISBN."""
+    isbn = fs.get('bookId_to_isbn', {}).get(bid, '')
+    if not isbn:
+        return None
+    return f"https://covers.openlibrary.org/b/isbn/{isbn}-L.jpg"
+
+
 def _top_shelves(bid, fs, n=3):
     """Return the top-n shelf tag names for a book by raw TF-IDF score."""
     shelf_ctx = fs['book_shelf_matrix'][fs['bookId_to_idx'][bid]]
@@ -185,6 +197,7 @@ def _score_books(user_emb, all_ids, all_embs, fs, exclude_titles, top_n=20):
         if title in exclude:
             continue
         rows.append({
+            'Cover':      _cover_url(bid, fs),
             'Title':      title,
             'Author':     fs['bookId_to_author'].get(bid, ''),
             'Year':       fs['bookId_to_year'].get(bid, '') if fs['bookId_to_year'].get(bid, '') != '-1' else '',
@@ -195,27 +208,39 @@ def _score_books(user_emb, all_ids, all_embs, fs, exclude_titles, top_n=20):
     return pd.DataFrame(rows)
 
 
+def _render_results(df: pd.DataFrame) -> None:
+    """Render a results DataFrame as a dataframe with cover images."""
+    st.dataframe(
+        df,
+        use_container_width=True,
+        hide_index=True,
+        row_height=_COVER_ROW_HEIGHT,
+        height=_COVER_ROW_HEIGHT * (len(df) // 2) + 38,  # 38px for header row
+        column_config={
+            'Cover': st.column_config.ImageColumn('Cover'),
+        },
+    )
+
+
 # ── Tab: Recommend ────────────────────────────────────────────────────────────
 
 def tab_recommend(model, fs, all_ids, all_embs, ts_inference):
     st.caption(
-        "Your book and genre selections are combined into a user tower embedding that is scored "
-        "against every book in the corpus. The more signal you provide, the sharper the recommendations."
+        "Select books you've enjoyed and the model will infer your taste. "
+        "The more books you add, the sharper the recommendations."
     )
     all_titles = fs['popularity_ordered_titles']
-    genres     = fs['genres_ordered']
 
     if st.session_state.pop('_clear_rec', False):
-        for key in ('rec_liked', 'rec_liked_genres', 'rec_shelf_tags'):
+        for key in ('rec_liked', 'rec_shelf_tags'):
             st.session_state[key] = []
 
     profile = st.session_state.pop('_load_profile', None)
     if profile:
-        st.session_state['rec_liked']        = USER_TYPE_TO_FAVORITE_BOOKS[profile]
-        st.session_state['rec_liked_genres'] = USER_TYPE_TO_FAVORITE_GENRES[profile]
+        st.session_state['rec_liked'] = USER_TYPE_TO_FAVORITE_BOOKS[profile]
 
     liked_titles = st.multiselect("Favorite Books", all_titles, key='rec_liked', max_selections=20)
-    liked_genres = st.multiselect("Favorite Genres", genres, key='rec_liked_genres')
+    liked_genres = []  # derived from book history in _build_user_embedding
 
     with st.expander("Refine by Shelf Tags (optional)"):
         st.caption(
@@ -242,7 +267,7 @@ def tab_recommend(model, fs, all_ids, all_embs, ts_inference):
         st.session_state['_clear_rec'] = True
         st.rerun()
     if btn_col.button("Get Recommendations", use_container_width=True):
-        if not liked_titles and not liked_genres and not selected_shelves:
+        if not liked_titles and not selected_shelves:
             st.warning("Select at least one liked book, genre, or shelf tag.")
             return
 
@@ -272,7 +297,7 @@ def tab_recommend(model, fs, all_ids, all_embs, ts_inference):
 
         df = _score_books(user_emb, all_ids, all_embs, fs,
                           exclude_titles=liked_titles + anchor_titles)
-        st.dataframe(df, use_container_width=True, hide_index=True)
+        _render_results(df)
 
 
 # ── Tab: Recommend (Examples) ─────────────────────────────────────────────────
@@ -289,17 +314,20 @@ def tab_recommend_examples(model, fs, all_ids, all_embs, ts_inference):
 
     if selected_profile:
         fav_books    = USER_TYPE_TO_FAVORITE_BOOKS[selected_profile]
+        liked_books  = USER_TYPE_TO_LIKED_BOOKS.get(selected_profile, [])
         fav_genres   = USER_TYPE_TO_FAVORITE_GENRES[selected_profile]
         shelf_tags   = USER_TYPE_TO_SHELF_TAGS.get(selected_profile, [])
 
-        anchor_titles = _get_shelf_anchors(fs, shelf_tags, exclude=set(fav_books))
+        anchor_titles = _get_shelf_anchors(
+            fs, shelf_tags, exclude=set(fav_books) | set(liked_books))
 
         missing = [t for t in fav_books if t not in fs['title_to_bookId']]
         if missing:
             st.warning("Not found in corpus (check title format): " + ", ".join(missing))
 
         liked_with_weights = (
-            [(t, _LIKED_BOOK)  for t in fav_books] +
+            [(t, _LIKED_BOOK)  for t in fav_books]   +
+            [(t, _ANCHOR_BOOK) for t in liked_books] +
             [(t, _ANCHOR_BOOK) for t in anchor_titles]
         )
 
@@ -309,16 +337,17 @@ def tab_recommend_examples(model, fs, all_ids, all_embs, ts_inference):
             )
 
         df = _score_books(user_emb, all_ids, all_embs, fs,
-                          exclude_titles=fav_books + anchor_titles)
+                          exclude_titles=fav_books + liked_books + anchor_titles)
 
-        st.subheader(f"Recommendations for: {selected_profile}")
+        display_name = selected_profile.removesuffix("'s Recommendations") if selected_profile.endswith("'s Recommendations") else selected_profile
+        st.subheader(f"Recommendations for: {display_name}")
         if fav_books:
             st.caption("Because you like: " + ", ".join(fav_books))
         if fav_genres:
             st.caption("Favorite genres: " + ", ".join(fav_genres))
         if anchor_titles:
             st.caption("Shelf anchors: " + ", ".join(anchor_titles))
-        st.dataframe(df, use_container_width=True, hide_index=True)
+        _render_results(df)
 
 
 # ── Tab: Similar ──────────────────────────────────────────────────────────────
@@ -352,6 +381,7 @@ def tab_similar(be, fs, all_ids, all_norm):
                 if candidate == bid:
                     continue
                 rows.append({
+                    'Cover':      _cover_url(candidate, fs),
                     'Title':      fs['bookId_to_title'][candidate],
                     'Author':     fs['bookId_to_author'].get(candidate, ''),
                     'Year':       fs['bookId_to_year'].get(candidate, '') if fs['bookId_to_year'].get(candidate, '') != '-1' else '',
@@ -361,7 +391,7 @@ def tab_similar(be, fs, all_ids, all_norm):
                 if len(rows) >= 20:
                     break
             st.subheader(f"Similar to: {title}")
-            st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+            _render_results(pd.DataFrame(rows))
 
 
 # ── Tab: Explore Genres ───────────────────────────────────────────────────────
@@ -392,15 +422,16 @@ def tab_explore_genres(model, be, fs):
         }
         rows = [
             {
+                'Cover':      _cover_url(bid, fs),
                 'Title':      fs['bookId_to_title'][bid],
                 'Author':     fs['bookId_to_author'].get(bid, ''),
-            'Year':       fs['bookId_to_year'].get(bid, '') if fs['bookId_to_year'].get(bid, '') != '-1' else '',
+                'Year':       fs['bookId_to_year'].get(bid, '') if fs['bookId_to_year'].get(bid, '') != '-1' else '',
                 'Top Shelves': _top_shelves(bid, fs),
                 'Score':      f'{s:.4f}',
             }
             for bid, s in sorted(sims.items(), key=lambda x: x[1], reverse=True)[:20]
         ]
-        st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+        _render_results(pd.DataFrame(rows))
 
 
 # ── Tab: Explore Shelves ──────────────────────────────────────────────────────
@@ -460,9 +491,10 @@ def tab_explore_shelves(model, be, fs):
         }
         rows = [
             {
+                'Cover':      _cover_url(bid, fs),
                 'Title':      fs['bookId_to_title'][bid] + ('  ◀ ANCHOR' if bid in anchor_set else ''),
                 'Author':     fs['bookId_to_author'].get(bid, ''),
-            'Year':       fs['bookId_to_year'].get(bid, '') if fs['bookId_to_year'].get(bid, '') != '-1' else '',
+                'Year':       fs['bookId_to_year'].get(bid, '') if fs['bookId_to_year'].get(bid, '') != '-1' else '',
                 'Top Shelves': _top_shelves(bid, fs),
                 'Score':      f'{s:.4f}',
             }
@@ -472,7 +504,7 @@ def tab_explore_shelves(model, be, fs):
             "Shelf anchors — "
             + " · ".join(f"{tag}: {title}" for tag, _, title in anchor_tag_book_pairs)
         )
-        st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+        _render_results(pd.DataFrame(rows))
 
 
 # ── Layout ────────────────────────────────────────────────────────────────────
