@@ -1,6 +1,7 @@
 # Book Recommender System — PyTorch Two-Tower Model
 
-**Live demo:** [book-recommender-system-two-tower-model.streamlit.app](https://book-recommender-system-two-tower-model.streamlit.app/)
+## Live Demo
+**demo link:** [book-recommender-system-two-tower-model.streamlit.app](https://book-recommender-system-two-tower-model.streamlit.app/)
 
 ## Introduction
 A PyTorch Two-Tower neural network trained on the [UCSD Goodreads dataset](https://cseweb.ucsd.edu/~jmcauley/datasets/goodreads.html) (~11k books, ~4.7M training examples). The model learns to match users to books via dot product of user and item embeddings.
