@@ -29,8 +29,8 @@ python main.py canary                   # Canary user recommendations (most rece
 python main.py canary <path>            # Canary user recommendations (specific checkpoint)
 python main.py probe                    # Embedding probes (most recent checkpoint)
 python main.py probe <path>             # Embedding probes (specific checkpoint)
-python main.py eval                     # Offline eval: Recall@K, NDCG@K, Hit Rate@K, MRR (planned)
-python main.py eval <path>              # Same, specific checkpoint (planned)
+python main.py eval                     # Offline eval: Recall@K, NDCG@K, Hit Rate@K, MRR
+python main.py eval <path>              # Same, specific checkpoint
 python main.py                          # Run all stages in order
 ```
 
@@ -138,7 +138,7 @@ Prediction: dot_product(user_combined, item_combined)
 - **v1: primary author only** — 80.7% of corpus books have exactly one author; multi-author avg-pool is a future improvement
 - `nn.Embedding(n_authors + 1, author_embedding_size)` with padding index = `n_authors`
 - Author vocab index 0 = `__unknown__` (books with no author metadata)
-- User author affinity = rating-weighted avg pool of primary author embeddings over read history
+- Author signal lives on the **item side only** — author pooling was removed from the user tower (same decision as shelf pooling; shared towers degraded probe quality)
 - 5,857 unique author vocab entries (including `__unknown__` at index 0) in the 11k-book corpus
 
 ### Current embedding sizes
@@ -162,11 +162,10 @@ item_year_embedding_size  = 10
 - **Loss**: cross-entropy over in-batch negatives. Each step: B×B score matrix, diagonal = correct targets.
 - **Dataset**: rollback examples — for each read event, context = all prior reads. Up to 10 examples per user sampled randomly. 4.7M train / 526k val examples.
 - **Optimizer**: Adam, `lr=0.001`, `weight_decay=1e-5`
-- **Batch size**: 256 (255 in-batch negatives per example)
+- **Batch size**: 512 (511 in-batch negatives per example)
 - **Temperature**: 0.05
 - **Steps**: 150,000
-- **Random baseline loss**: `log(batch_size)` = `log(256)` ≈ 5.545 — confirmed at step 0
-- **Best achieved val loss**: 4.4225 (step 120k of 150k)
+- **Random baseline loss**: `log(batch_size)` = `log(512)` ≈ 6.238 — confirmed at step 0
 - Val loss has high variance with in-batch negatives (different negatives each eval batch) — ±0.2 oscillation is normal
 
 **Legacy: BPR** (`python main.py train`) — kept for reference, not the primary path
@@ -220,31 +219,31 @@ Canary users are synthetic — no real read timestamps. All receive `ts_max_bin`
 
 **Implicit vs explicit feedback tradeoff** — explicit ratings (BPR) give clean preference signal but are sparse. Implicit feedback (reads via `is_read`) is abundant but noisy. Consider a hybrid: softmax for candidate generation, explicit ratings for a separate ranking stage.
 
-### Offline Evaluation Framework (planned, not yet implemented)
+### Offline Evaluation Framework ✅ Implemented
 
-**Goal:** Replace canary-only evaluation with proper retrieval metrics (Recall@K, NDCG@K, Hit Rate@K, MRR) computed on real held-out user data. Enables apples-to-apples comparison between checkpoints and model variants.
+`python main.py eval [checkpoint_path]` — implemented in `src/offline_eval.py`.
 
-**Protocol:** Leave-label-out per user. The FeatureStore already performs an 80/20 per-user split during feature construction:
+**Protocol:** Leave-label-out per user. The FeatureStore 80/20 per-user split from `features.py` is reused directly:
 - **Context** = `user_to_read_history` (80% of reads, pre-mapped book indices + debiased ratings)
-- **Targets** = `user_to_book_to_rating_LABEL` (remaining 20% of reads — the books to retrieve)
+- **Targets** = `user_to_book_to_rating_LABEL` (remaining 20% of reads)
 
-No new splits or dataset regeneration required.
+5,000 users sampled with `random.Random(42)` for reproducibility. No new splits or dataset regeneration required.
 
-**Implementation plan:**
-1. New file `src/offline_eval.py` — `run_offline_eval(model, fs, n_users=5000, ks=(1,5,10,20,50), seed=42)`
-2. Sample 5,000 users with `random.Random(42)` for reproducibility
-3. For each user: build user embedding from pre-computed `user_to_read_history` + `user_to_genre_context`, score all ~11k books via dot product with pre-computed item embeddings, check how many label books land in top-K
-4. New CLI command: `python main.py eval [checkpoint_path]`
+**Metrics:** Recall@K, Hit Rate@K, NDCG@K, MRR at K = 1, 5, 10, 20, 50.
 
-**Metrics:**
-- **Recall@K** = |label books in top-K| / |label books|, macro-averaged across users
-- **Hit Rate@K** = fraction of users with ≥1 label book in top-K
-- **NDCG@K** = normalized discounted cumulative gain over label books
-- **MRR** = mean reciprocal rank of the highest-ranked label book
+**Results (corpus ~11k books, random Hit Rate@10 baseline ≈ 0.09%):**
 
-**Sanity check:** Random baseline Hit Rate@50 ≈ 0.4% (50/11k). A trained model should be 5–20× above that.
+| Metric | MSE | BPR | Softmax |
+|---|---|---|---|
+| Hit Rate@10 | 4.3% | 2.8% | **11.7%** |
+| Hit Rate@50 | 16.8% | 14.4% | **31.3%** |
+| Recall@10 | 0.0061 | 0.0033 | **0.0194** |
+| NDCG@10 | 0.0062 | 0.0036 | **0.0213** |
+| MRR | 0.021 | 0.015 | **0.057** |
 
-**Key reuse:** `build_book_embeddings()` from `evaluate.py` pre-computes the (11k × 100) item embedding matrix. Scoring 5,000 users is then a batched (5000×100) @ (100×11k) matrix multiply — fast on CPU.
+Softmax is ~3× better than MSE and ~4× better than BPR on Hit Rate@10.
+
+**Checkpoint naming convention:** loss type is encoded in the filename — `best_mse_*`, `best_bpr_*`, `best_softmax_*`. `_resolve_checkpoint` and `_load_model_and_embeddings` in `evaluate.py` auto-detect the correct config from the prefix.
 
 ### YouTube DNN implementation details (Covington et al., 2016)
 
