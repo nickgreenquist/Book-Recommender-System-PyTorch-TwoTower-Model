@@ -175,7 +175,7 @@ def _cover_url(bid, fs):
     """Return Open Library cover URL for a book, or None if no ISBN."""
     isbn = fs.get('bookId_to_isbn', {}).get(bid, '')
     if not isbn:
-        return None
+        return ''
     return f"https://covers.openlibrary.org/b/isbn/{isbn}-L.jpg"
 
 
@@ -507,6 +507,97 @@ def tab_explore_shelves(model, be, fs):
         _render_results(pd.DataFrame(rows))
 
 
+# ── Tab: About ───────────────────────────────────────────────────────────────
+
+def tab_about():
+    col, _ = st.columns([1, 1])
+    with col:
+        st.header("What is this?")
+        st.markdown(
+            "A PyTorch two-tower neural network trained on the "
+            "[UCSD Goodreads dataset](https://cseweb.ucsd.edu/~jmcauley/datasets/goodreads.html) "
+            "(~11k books, ~4.7M training examples)."
+        )
+        st.markdown(
+            "Trained with in-batch negatives softmax loss, following the YouTube DNN retrieval "
+            "approach (Covington et al., 2016)."
+        )
+        st.markdown(
+            "At inference, a dot product of the user and item embeddings retrieves the most relevant books."
+        )
+
+        st.subheader("The core design choice: no user ID")
+        st.markdown("Most recommender systems embed a unique ID for every user in the training set.")
+        st.markdown("This works, but has a fundamental limitation: **inference is only possible for users the model has already seen.**")
+        st.markdown("If a new user signs up, you have no embedding for them. Your options are:")
+        st.markdown("""
+- Retrain the entire model
+- Partially fine-tune the new user in with a few gradient steps
+- Find an existing user who seems similar and use their embedding as a proxy
+""")
+        st.markdown("This model takes a different approach. **There is no user ID embedding.**")
+        st.markdown("Instead, every user is represented as a function of their taste signals — read history, genre affinity, and timestamp.")
+        st.markdown("The model learns to embed *features of the user*, not the user themselves.")
+        st.markdown("This means the model can generate recommendations for **any user** as long as you can provide even a small amount of signal: a few books they liked, some genres they prefer.")
+        st.markdown("No retraining required. No cold-start problem at the user level. The same trained model works for users who never existed when the model was trained.")
+
+    col, _ = st.columns([1, 1])
+    with col:
+        st.header("User Tower")
+        st.markdown(
+            "Each component encodes a different aspect of taste into a fixed-size vector. "
+            "All three are concatenated into a single 100-dim user embedding."
+        )
+        st.markdown("""
+| Component | Input | What it learns |
+|---|---|---|
+| Rating-Weighted Avg Pool | Read history — book IDs weighted by ratings | Collaborative taste — liked books pull the user toward similar items in embedding space |
+| user_genre_tower | Avg rating per genre + read fraction per genre | Genre affinity — how strongly you lean toward each of the broad genre categories |
+| timestamp_embedding_tower | Month bin of most recent read activity | Temporal context — captures when in time the user's taste signal was formed |
+""", unsafe_allow_html=True)
+
+        st.header("Item Tower")
+        st.markdown(
+            "Each book is encoded from five independent signals into a single 100-dim item embedding."
+        )
+        st.markdown("""
+| Component | Input | What it learns |
+|---|---|---|
+| item_embedding_tower | Book ID (shared lookup with user history pool) | Collaborative identity — a learned fingerprint for each book based on who reads it together |
+| item_genre_tower | Genre vote-weighted vector | Broad genre positioning |
+| item_shelf_tower | TF-IDF shelf tag scores (3,032 tags) | Crowd-sourced descriptors — granular signals like "cozy-mystery", "epic-fantasy", "dark" |
+| author_tower | Primary author index | Author identity — clusters books by the same author and stylistically similar authors |
+| year_embedding_tower | Original publication year | Era — captures stylistic and cultural shifts across decades |
+""", unsafe_allow_html=True)
+
+        st.header("Shared Embeddings")
+        st.markdown("""
+**item_embedding_lookup** — The same embedding table is used for the target book's ID
+*and* for each book in the user's read history pool.
+
+This forces the user's history representation and the item's identity into the same
+space: a book you liked pulls your user embedding directly toward that book's embedding.
+""")
+
+        st.header("Training")
+        st.markdown("""
+- **Dataset:** UCSD Goodreads — ~228M interactions across ~2.4M users and ~2.4M books
+- **Corpus filtering:** Books with fewer than 10,000 ratings are excluded (~11k books retained). Users with fewer than 20 or more than 500 corpus ratings are excluded. This ensures every book and user in the training set has enough signal to learn meaningful embeddings. It also keeps the serving artifacts small enough to deploy on Streamlit Cloud without needing paid infrastructure.
+- **Loss:** Cross-entropy over in-batch negatives (softmax) — each step produces a B×B score matrix; diagonal entries are the correct targets
+- **Optimizer:** Adam, lr=0.001, weight_decay=1e-5, CosineAnnealingLR
+- **Batch size:** 512 (511 in-batch negatives per example)
+- **Steps:** 150,000
+- **Training examples:** Rollback construction — for each read event, context = all prior reads. Up to 10 examples per user sampled randomly (~4.7M train / 526k val)
+""")
+
+        st.header("Limitations")
+        st.markdown("""
+- ~11k-book corpus — books with fewer than 10,000 ratings are not included
+- Romance and literary women's fiction can bleed into each other due to overlapping genre/shelf signals
+- The timestamp tower is a weak signal in the app — all inference users receive the most recent timestamp bin
+""")
+
+
 # ── Layout ────────────────────────────────────────────────────────────────────
 
 st.set_page_config(page_title="Book Recommender", layout="wide")
@@ -548,8 +639,8 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-recommend_tab, examples_tab, similar_tab, genres_tab, shelves_tab = st.tabs(
-    ["Recommend", "Examples", "Similar", "Genres", "Shelves"]
+recommend_tab, examples_tab, similar_tab, genres_tab, shelves_tab, about_tab = st.tabs(
+    ["Recommend", "Examples", "Similar", "Genres", "Shelves", "About"]
 )
 
 with recommend_tab:
@@ -566,3 +657,6 @@ with genres_tab:
 
 with shelves_tab:
     tab_explore_shelves(model, be, fs)
+
+with about_tab:
+    tab_about()
