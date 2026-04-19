@@ -29,6 +29,8 @@ python main.py canary                   # Canary user recommendations (most rece
 python main.py canary <path>            # Canary user recommendations (specific checkpoint)
 python main.py probe                    # Embedding probes (most recent checkpoint)
 python main.py probe <path>             # Embedding probes (specific checkpoint)
+python main.py eval                     # Offline eval: Recall@K, NDCG@K, Hit Rate@K, MRR (planned)
+python main.py eval <path>              # Same, specific checkpoint (planned)
 python main.py                          # Run all stages in order
 ```
 
@@ -217,6 +219,32 @@ Canary users are synthetic — no real read timestamps. All receive `ts_max_bin`
 3. **~~In-batch negative debiasing (log-frequency correction)~~** — ❌ Tried and removed. Subtracting `log(p_i)` from negative logits (Yi et al., Google RecSys 2019) did not converge on this dataset. Root causes: (a) with ~11k books, the item frequency distribution is very compressed — corrections ranged from 4.91 to 10.0 with ~87% of books clustered near 9-10, so the correction added almost no useful signal. (b) The correction destabilized training even with L2 normalization and diagonal zeroing. Do not re-attempt without a much larger, more skewed item distribution.
 
 **Implicit vs explicit feedback tradeoff** — explicit ratings (BPR) give clean preference signal but are sparse. Implicit feedback (reads via `is_read`) is abundant but noisy. Consider a hybrid: softmax for candidate generation, explicit ratings for a separate ranking stage.
+
+### Offline Evaluation Framework (planned, not yet implemented)
+
+**Goal:** Replace canary-only evaluation with proper retrieval metrics (Recall@K, NDCG@K, Hit Rate@K, MRR) computed on real held-out user data. Enables apples-to-apples comparison between checkpoints and model variants.
+
+**Protocol:** Leave-label-out per user. The FeatureStore already performs an 80/20 per-user split during feature construction:
+- **Context** = `user_to_read_history` (80% of reads, pre-mapped book indices + debiased ratings)
+- **Targets** = `user_to_book_to_rating_LABEL` (remaining 20% of reads — the books to retrieve)
+
+No new splits or dataset regeneration required.
+
+**Implementation plan:**
+1. New file `src/offline_eval.py` — `run_offline_eval(model, fs, n_users=5000, ks=(1,5,10,20,50), seed=42)`
+2. Sample 5,000 users with `random.Random(42)` for reproducibility
+3. For each user: build user embedding from pre-computed `user_to_read_history` + `user_to_genre_context`, score all ~11k books via dot product with pre-computed item embeddings, check how many label books land in top-K
+4. New CLI command: `python main.py eval [checkpoint_path]`
+
+**Metrics:**
+- **Recall@K** = |label books in top-K| / |label books|, macro-averaged across users
+- **Hit Rate@K** = fraction of users with ≥1 label book in top-K
+- **NDCG@K** = normalized discounted cumulative gain over label books
+- **MRR** = mean reciprocal rank of the highest-ranked label book
+
+**Sanity check:** Random baseline Hit Rate@50 ≈ 0.4% (50/11k). A trained model should be 5–20× above that.
+
+**Key reuse:** `build_book_embeddings()` from `evaluate.py` pre-computes the (11k × 100) item embedding matrix. Scoring 5,000 users is then a batched (5000×100) @ (100×11k) matrix multiply — fast on CPU.
 
 ### YouTube DNN implementation details (Covington et al., 2016)
 

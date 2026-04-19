@@ -590,6 +590,24 @@ space: a book you liked pulls your user embedding directly toward that book's em
 - **Training examples:** Rollback construction — for each read event, context = all prior reads. Up to 10 examples per user sampled randomly (~4.7M train / 526k val)
 """)
 
+        st.header("Offline Evaluation Results")
+        st.markdown(
+            "Leave-label-out protocol on 5,000 held-out users (~11k book corpus). "
+            "Random baseline Hit Rate@10 ≈ 0.09%."
+        )
+        st.markdown("""
+| Metric | MSE | BPR | **Softmax** |
+|---|---|---|---|
+| Hit Rate@10 | 4.3% | 2.8% | **11.7%** |
+| Hit Rate@50 | 16.8% | 14.4% | **31.3%** |
+| Recall@10 | 0.0061 | 0.0033 | **0.0194** |
+| NDCG@10 | 0.0062 | 0.0036 | **0.0213** |
+| MRR | 0.021 | 0.015 | **0.057** |
+""")
+        st.markdown(
+            "Switching from MSE to in-batch negatives softmax improved Hit Rate@10 by **171%** and MRR by **171%**."
+        )
+
         st.header("Limitations")
         st.markdown("""
 - ~11k-book corpus — books with fewer than 10,000 ratings are not included

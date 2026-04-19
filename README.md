@@ -8,6 +8,21 @@ A PyTorch Two-Tower neural network trained on the [UCSD Goodreads dataset](https
 
 This is a sibling project to the [Movie Recommender System](https://github.com/nickgreenquist/Movie-Recommender-System-PyTorch-TwoTower-Model).
 
+## Results
+
+Offline evaluation on 5,000 held-out users (leave-label-out protocol, corpus of ~11k books).
+Random baseline Hit Rate@10 ≈ 0.09%.
+
+| Metric | MSE | BPR | **Softmax** |
+|---|---|---|---|
+| Hit Rate@10 | 4.3% | 2.8% | **11.7%** |
+| Hit Rate@50 | 16.8% | 14.4% | **31.3%** |
+| Recall@10 | 0.0061 | 0.0033 | **0.0194** |
+| NDCG@10 | 0.0062 | 0.0036 | **0.0213** |
+| MRR | 0.021 | 0.015 | **0.057** |
+
+Switching from MSE to in-batch negatives softmax improved Hit Rate@10 by **171%** and MRR by **171%**.
+
 ## Key design choices
 
 - **No user ID embedding** — users are represented entirely by taste signals: rating-weighted avg pooling of book embeddings, genre affinity, and read timestamp. Any user can get recommendations from just a few books they liked, with no retraining required.

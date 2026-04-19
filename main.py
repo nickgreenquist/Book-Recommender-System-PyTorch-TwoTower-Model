@@ -15,6 +15,8 @@ Usage:
     python main.py probe <path>          # Embedding probes (specific checkpoint)
     python main.py export                # Stage 5: export serving artifacts to serving/
     python main.py export <path>         # Stage 5: export from specific checkpoint
+    python main.py eval                  # Offline eval: Recall@K, NDCG@K, Hit Rate@K, MRR
+    python main.py eval <path>           # Same, specific checkpoint
     python main.py                       # Run all stages in order (BPR)
 """
 import sys
@@ -105,6 +107,21 @@ def cmd_probe(checkpoint_path=None):
     run_probes(data_dir=DATA_DIR, checkpoint_path=checkpoint_path, version=VERSION)
 
 
+def cmd_eval(checkpoint_path=None):
+    import torch
+    from src.dataset import load_features
+    from src.evaluate import _resolve_checkpoint, _load_model_and_embeddings
+    from src.offline_eval import run_offline_eval
+
+    cp = _resolve_checkpoint(checkpoint_path, 'saved_models')
+    if cp is None:
+        return
+    print("Loading features ...")
+    fs = load_features(DATA_DIR, VERSION)
+    model, _, _, _, _, _ = _load_model_and_embeddings(cp, fs)
+    run_offline_eval(model, fs, checkpoint_path=cp)
+
+
 COMMANDS = {
     'preprocess': cmd_preprocess,
     'explore':    cmd_explore,
@@ -114,6 +131,7 @@ COMMANDS = {
     'canary':     cmd_canary,
     'probe':      cmd_probe,
     'export':     cmd_export,
+    'eval':       cmd_eval,
 }
 
 if __name__ == '__main__':
@@ -133,7 +151,7 @@ if __name__ == '__main__':
             sys.exit(1)
         cmd_preprocess(step=step)
     elif args[0] in COMMANDS:
-        if args[0] in ('canary', 'probe', 'export') and len(args) > 1:
+        if args[0] in ('canary', 'probe', 'export', 'eval') and len(args) > 1:
             COMMANDS[args[0]](checkpoint_path=args[1])
         elif args[0] in ('dataset', 'train') and len(args) > 1:
             COMMANDS[args[0]](variant=' '.join(args[1:]))

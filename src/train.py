@@ -177,8 +177,9 @@ def train(model: BookRecommender, train_data: tuple, val_data: tuple,
 
     os.makedirs(checkpoint_dir, exist_ok=True)
     run_timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    loss_tag      = 'bpr' if use_bpr else 'mse'
     best_val_loss = float('inf')
-    best_path     = os.path.join(checkpoint_dir, f'best_checkpoint_{run_timestamp}.pth')
+    best_path     = os.path.join(checkpoint_dir, f'best_{loss_tag}_{run_timestamp}.pth')
 
     loss_train = []
     loss_val   = []
@@ -276,7 +277,7 @@ def train(model: BookRecommender, train_data: tuple, val_data: tuple,
 
             if i > 0 and i % checkpoint_every == 0:
                 periodic = os.path.join(checkpoint_dir,
-                                        f'checkpoint_{run_timestamp}_step_{i:06d}.pth')
+                                        f'{loss_tag}_{run_timestamp}_step_{i:06d}.pth')
                 torch.save(model.state_dict(), periodic)
                 print(f"  → periodic checkpoint → {periodic}")
 
