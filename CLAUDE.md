@@ -201,7 +201,7 @@ Canary users are synthetic — no real read timestamps. All receive `ts_max_bin`
 | `dataset.py` | Adapted — same logic, `top_books` / `bookId_to_title` field names |
 | `model.py` | Extended — author tower added to both item side and user side |
 | `train.py` | Identical |
-| `evaluate.py` | Adapted — canary dicts use book titles, shelf tags instead of genome tags |
+| `evaluate.py` | Adapted — canary dicts use book titles and shelf tags |
 | `export.py` | Identical |
 
 ## Future Improvements
@@ -223,9 +223,9 @@ Canary users are synthetic — no real read timestamps. All receive `ts_max_bin`
 
 `python main.py eval [checkpoint_path]` — implemented in `src/offline_eval.py`.
 
-**Protocol:** Leave-label-out per user. The FeatureStore 80/20 per-user split from `features.py` is reused directly:
-- **Context** = `user_to_read_history` (80% of reads, pre-mapped book indices + debiased ratings)
-- **Targets** = `user_to_book_to_rating_LABEL` (remaining 20% of reads)
+**Protocol:** Leave-label-out per user. The FeatureStore 90/10 per-user split from `preprocess.py` (`PERCENT_READ_HISTORY = 0.9`) is reused directly:
+- **Context** = `user_to_read_history` (90% of reads, sorted by timestamp, pre-mapped book indices + debiased ratings)
+- **Targets** = `user_to_book_to_rating_LABEL` (remaining 10% of reads)
 
 5,000 users sampled with `random.Random(42)` for reproducibility. No new splits or dataset regeneration required.
 
@@ -255,17 +255,17 @@ Key design decisions from the paper that directly apply to our softmax implement
 - **Why rollback for both train and val (not "last read holdout" for val):** Rollback produces examples with varying context lengths (short to long). If val used only each user's last read (full history as context), val examples would always have long contexts while training has short+long — a distribution mismatch that makes val loss unreliable. Using rollback for both keeps context length distribution consistent.
 
 **Negative sampling:**
-- Sample several thousand negatives per step from the background distribution (popularity-proportional, i.e. log-uniform over item frequency). Correct for sampling bias via importance weighting.
-- This gives ~100x speedup over full softmax while maintaining accuracy. Hierarchical softmax is an alternative but Google found it inferior in practice.
+- The paper recommends sampling several thousand negatives per step from the background distribution (popularity-proportional) with importance weighting to correct for sampling bias.
+- **Our implementation uses in-batch negatives instead** — the other 511 items in each batch of 512 serve as negatives. Simpler and effective for our ~11k book corpus. Dedicated sampled negatives would be more important at larger corpus sizes.
 
 **"Example age" feature (skip for books):**
 - The paper feeds `age = t_max - t_read` to correct bias toward older popular videos. For books this doesn't apply — *Crime and Punishment* is as recommendable as a book published last month, and the corpus is essentially static.
 - User recency is already captured by the timestamp embedding (read month bin), which signals how recently the user's taste context was formed.
 
 **Serving (inference):**
-- At serving time, the softmax output layer is not needed. Prediction reduces to **nearest neighbor search in dot product space**: compute the user embedding from their read history, then find the closest item embeddings via ANN (approximate nearest neighbor).
-- Item embeddings (the softmax output weight matrix) are indexed offline. User embeddings are computed on the fly from their history.
-- This is identical to what our current model does — the softmax change doesn't affect the serving architecture.
+- At serving time, the softmax normalisation is not needed — raw dot product scores are sufficient for ranking.
+- YouTube uses ANN (approximate nearest neighbor search) because their corpus is billions of videos — you can't dot product against billions of items in real time.
+- **Our corpus is ~11k books**, so we compute all 11k dot products exactly and take the top 20. No ANN needed. This is what `_score_books` does in the Streamlit app and what `run_offline_eval` does for evaluation.
 
 **Shared item ID embedding:**
 - The item ID embedding table is shared between the item tower output and the user history avg pool (we already do this). The paper does the same — a single global video embedding used for both the "what video is this" tower and the "what has the user watched" history representation.
