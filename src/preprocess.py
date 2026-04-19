@@ -132,6 +132,8 @@ def run_books(data_dir: str = 'data') -> None:
             # Prefer original publication year from works; fall back to edition year
             wid  = b.get('work_id', '')
             year = work_pub_year.get(wid) or str(b.get('publication_year', '') or '-1')
+            # Prefer ISBN-13, fall back to ISBN-10
+            isbn = str(b.get('isbn13', '') or b.get('isbn', '') or '').strip()
             rows.append({
                 'book_id':          bid,
                 'title':            b.get('title', ''),
@@ -139,6 +141,7 @@ def run_books(data_dir: str = 'data') -> None:
                 'genres':           genre_list,
                 'author_ids':       author_ids,
                 'primary_author':   primary_author,
+                'isbn':             isbn,
                 'ratings_count':    rc,
                 'popular_shelves':  b.get('popular_shelves', []),
             })

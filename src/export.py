@@ -78,6 +78,7 @@ def run_export(data_dir: str = 'data', checkpoint_path: str = None,
     print("Computing popularity order ...")
     books_df      = pd.read_parquet(os.path.join(data_dir, 'base_books.parquet'))
     bookId_to_author = dict(zip(books_df['book_id'].astype(str), books_df.get('primary_author', '')))
+    bookId_to_isbn   = dict(zip(books_df['book_id'].astype(str), books_df.get('isbn', '')))
     books_sorted  = books_df.sort_values('ratings_count', ascending=False)
     top_set       = set(fs.top_books)
     popularity_ordered_titles = [
@@ -133,6 +134,7 @@ def run_export(data_dir: str = 'data', checkpoint_path: str = None,
         'bookId_to_year':   fs.bookId_to_year,
         'bookId_to_genres': fs.bookId_to_genres,
         'bookId_to_author': bookId_to_author,
+        'bookId_to_isbn':   bookId_to_isbn,
         # Context dicts stored as float32 arrays to reduce pickle overhead
         'bookId_to_genre_context': {
             bid: np.array(v, dtype=np.float32)
