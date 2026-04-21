@@ -387,16 +387,16 @@ def train_softmax(model: BookRecommender, train_data: tuple, val_data: tuple,
                 vidx = torch.randint(0, n_val, (minibatch_size,)).tolist()
                 vhp  = pad_history_batch([X_history_val[j] for j in vidx], pad_idx)
                 vrp  = pad_history_ratings_batch([X_history_ratings_val[j] for j in vidx])
-                U = F.normalize(model.user_embedding(X_genre_val[vidx], vhp, vrp, timestamp_val[vidx]), dim=1)
-                V = F.normalize(model.item_embedding(target_genre_val[vidx], target_year_val[vidx],
-                                         target_book_idx_val[vidx], target_author_idx_val[vidx]), dim=1)
+                U = model.user_embedding(X_genre_val[vidx], vhp, vrp, timestamp_val[vidx])
+                V = model.item_embedding(target_genre_val[vidx], target_year_val[vidx],
+                                         target_book_idx_val[vidx], target_author_idx_val[vidx])
                 scores    = (U @ V.T) / temperature                              # (B, B)
                 labels    = torch.arange(len(vidx))
                 val_loss  = F.cross_entropy(scores, labels).item()
 
                 if i == 0:
-                    raw_scores = U @ V.T   # U, V already L2-normalized at this point
-                    print(f"  [logit diagnostics] normalized dot products — "
+                    raw_scores = U @ V.T
+                    print(f"  [logit diagnostics] raw dot products — "
                           f"mean={raw_scores.mean().item():.6f}  "
                           f"std={raw_scores.std().item():.6f}  "
                           f"min={raw_scores.min().item():.6f}  "
@@ -429,9 +429,9 @@ def train_softmax(model: BookRecommender, train_data: tuple, val_data: tuple,
             ix  = torch.randint(0, n_train, (minibatch_size,)).tolist()
             hp  = pad_history_batch([X_history_train[j] for j in ix], pad_idx)
             rp  = pad_history_ratings_batch([X_history_ratings_train[j] for j in ix])
-            U   = F.normalize(model.user_embedding(X_genre_train[ix], hp, rp, timestamp_train[ix]), dim=1)
-            V   = F.normalize(model.item_embedding(target_genre_train[ix], target_year_train[ix],
-                                       target_book_idx_train[ix], target_author_idx_train[ix]), dim=1)
+            U   = model.user_embedding(X_genre_train[ix], hp, rp, timestamp_train[ix])
+            V   = model.item_embedding(target_genre_train[ix], target_year_train[ix],
+                                       target_book_idx_train[ix], target_author_idx_train[ix])
             scores = (U @ V.T) / temperature                                     # (B, B)
             labels = torch.arange(len(ix))
             loss   = F.cross_entropy(scores, labels)

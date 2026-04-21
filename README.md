@@ -12,18 +12,18 @@ This is a sibling project to the [Movie Recommender System](https://github.com/n
 
 ## Results
 
-Offline evaluation on 5,000 held-out users (leave-label-out protocol, corpus of ~11k books).
-Random baseline Hit Rate@10 ≈ 0.09%.
+Offline evaluation on 5,000 held-out val users (leave-label-out protocol, corpus of ~11k books).
+Random baseline Hit Rate@10 ≈ 0.87% (avg ~10 label books per user).
 
 | Metric | MSE | BPR | **Softmax** |
 |---|---|---|---|
-| Hit Rate@10 | 4.3% | 2.8% | **11.7%** |
-| Hit Rate@50 | 16.8% | 14.4% | **31.3%** |
-| Recall@10 | 0.0061 | 0.0033 | **0.0194** |
-| NDCG@10 | 0.0062 | 0.0036 | **0.0213** |
-| MRR | 0.021 | 0.015 | **0.057** |
+| Hit Rate@10 | 4.7% | 3.5% | **10.7%** |
+| Hit Rate@50 | 17.6% | 14.4% | **28.9%** |
+| Recall@10 | 0.0069 | 0.0041 | **0.0164** |
+| NDCG@10 | 0.0073 | 0.0042 | **0.0189** |
+| MRR | 0.024 | 0.016 | **0.053** |
 
-Switching from MSE to in-batch negatives softmax improved Hit Rate@10 by **171%** and MRR by **171%**.
+Switching from MSE to in-batch negatives softmax improved Hit Rate@10 by **127%** and MRR by **120%**.
 
 ## Key design choices
 

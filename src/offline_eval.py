@@ -2,10 +2,13 @@
 Offline retrieval evaluation — Recall@K, NDCG@K, Hit Rate@K, MRR.
 
 Protocol: leave-label-out per user.
-  Context = user_to_read_history (80% of reads, pre-mapped book indices)
-  Targets = user_to_book_to_rating_LABEL (remaining 20% of reads)
+  Context = user_to_read_history (90% of reads, pre-mapped book indices)
+  Targets = user_to_book_to_rating_LABEL (remaining 10% of reads)
 
-No new splits needed — reuses the existing 80/20 split from features.py.
+No new splits needed — reuses the existing 90/10 split from preprocess.py.
+Eval is restricted to the validation user set (last 10% of the shuffle used
+in make_softmax_splits, seed=42, pct_train=0.9) to avoid evaluating on
+users seen during training.
 
 Usage:
     python main.py eval
@@ -15,6 +18,7 @@ import math
 import random
 
 import torch
+import torch.nn.functional as F
 
 from src.dataset import FeatureStore
 from src.evaluate import build_book_embeddings
@@ -25,7 +29,8 @@ def run_offline_eval(model: BookRecommender, fs: FeatureStore,
                      checkpoint_path: str = '',
                      n_users: int = 5_000,
                      ks: tuple = (1, 5, 10, 20, 50),
-                     seed: int = 42) -> None:
+                     dataset_seed: int = 42,
+                     dataset_pct_train: float = 0.9) -> None:
     model.eval()
 
     # ── Pre-compute item embedding matrix ────────────────────────────────────
@@ -37,11 +42,19 @@ def run_offline_eval(model: BookRecommender, fs: FeatureStore,
     )  # (n_books, 100)
     bid_to_pos = {bid: i for i, bid in enumerate(all_ids)}
 
-    # ── Sample eval users ────────────────────────────────────────────────────
-    eligible = [u for u in fs.user_ids
+    # ── Derive val users: replicate the same shuffle+split used in make_softmax_splits ──
+    # This ensures eval only covers users not seen during training.
+    all_users = fs.user_ids[:]
+    rng_split = random.Random(dataset_seed)
+    rng_split.shuffle(all_users)
+    split     = int(len(all_users) * dataset_pct_train)
+    val_users_full = all_users[split:]
+
+    eligible = [u for u in val_users_full
                 if fs.user_to_read_history.get(u)
                 and fs.user_to_book_to_rating_LABEL.get(u)]
-    rng = random.Random(seed)
+
+    rng = random.Random(dataset_seed)
     eval_users = rng.sample(eligible, min(n_users, len(eligible)))
 
     # ── Timestamp: use max bin (same as canary) ───────────────────────────────
@@ -119,15 +132,22 @@ def run_offline_eval(model: BookRecommender, fs: FeatureStore,
         return
 
     # ── Print results ─────────────────────────────────────────────────────────
-    max_k = max(ks)
-    random_hit_baseline = max_k / len(all_ids)
+    # Correct random Hit Rate@K: P(at least 1 of K random items is a target)
+    # = 1 - (1 - avg_labels/corpus)^K, where avg_labels accounts for multi-label users.
+    n_corpus   = len(all_ids)
+    avg_labels = sum(
+        len([b for b in fs.user_to_book_to_rating_LABEL[u] if b in bid_to_pos])
+        for u in eval_users
+    ) / max(n_eval, 1)
 
-    print(f"\n── Offline Evaluation  (n={n_eval:,} users, leave-label-out) "
+    print(f"\n── Offline Evaluation  (n={n_eval:,} val users, leave-label-out) "
           + "─" * 20)
     if checkpoint_path:
         print(f"Checkpoint: {checkpoint_path}")
-    print(f"Corpus: {len(all_ids):,} books  |  "
-          f"Random Hit Rate@{max_k} baseline: {random_hit_baseline:.3%}\n")
+    print(f"Corpus: {n_corpus:,} books  |  Avg label books/user: {avg_labels:.1f}")
+    print(f"Random Hit Rate baselines: " + "  ".join(
+        f"@{k}: {1 - (1 - avg_labels/n_corpus)**k:.3%}" for k in ks
+    ) + "\n")
 
     header = f"{'K':>6}  {'Recall@K':>10}  {'Hit Rate@K':>11}  {'NDCG@K':>8}"
     print(header)

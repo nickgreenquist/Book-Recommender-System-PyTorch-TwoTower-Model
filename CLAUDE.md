@@ -204,6 +204,12 @@ Canary users are synthetic — no real read timestamps. All receive `ts_max_bin`
 | `evaluate.py` | Adapted — canary dicts use book titles and shelf tags |
 | `export.py` | Identical |
 
+## Immediate Next Step
+
+**Export the new softmax model** — `python main.py export saved_models/best_softmax_20260421_091656.pth`
+
+Retrain complete (`best_softmax_20260421_091656.pth`). This model uses raw inner products, matching the YouTube DNN paper. Eval numbers updated. Run canary to verify quality, then export to update the serving artifacts for the Streamlit app.
+
 ## Future Improvements
 
 ### Training objective
@@ -216,6 +222,7 @@ Canary users are synthetic — no real read timestamps. All receive `ts_max_bin`
 1. **~~LR schedule~~** — ✅ Implemented. CosineAnnealingLR from 0.001→0 over training steps. Eliminated the early plateau seen in the first softmax run.
 2. **~~Larger batch~~** — ✅ 512 (511 in-batch negatives). Confirmed better drop-from-baseline than batch=256.
 3. **~~In-batch negative debiasing (log-frequency correction)~~** — ❌ Tried and removed. Subtracting `log(p_i)` from negative logits (Yi et al., Google RecSys 2019) did not converge on this dataset. Root causes: (a) with ~11k books, the item frequency distribution is very compressed — corrections ranged from 4.91 to 10.0 with ~87% of books clustered near 9-10, so the correction added almost no useful signal. (b) The correction destabilized training even with L2 normalization and diagonal zeroing. Do not re-attempt without a much larger, more skewed item distribution.
+4. **Remove F.normalize from training (match YouTube paper)** — ⚠️ Code change made, **retrain required**. The previous softmax training loop applied `F.normalize` to both U and V before the dot product, making training optimize cosine similarity instead of inner product. The YouTube DNN paper uses raw dot products throughout — no L2 normalization. This created a training/inference mismatch: inference used raw dot products (matching the paper) but training used cosine (deviating from it). Empirically confirmed: Poetry Lover recommendations degraded from poetry books to graphic novels when inference was switched to cosine — the model's embedding magnitudes carry real signal (specific, well-differentiated items have larger norms) that cosine discards. `F.normalize` has been removed from `train_softmax`. Eval numbers and canary results from the current checkpoint (`best_softmax_20260412_093406.pth`) are still valid because inference already used raw dot products; they just reflect a model trained with a suboptimal objective. After retraining, re-run `python main.py eval` and update the results table.
 
 **Implicit vs explicit feedback tradeoff** — explicit ratings (BPR) give clean preference signal but are sparse. Implicit feedback (reads via `is_read`) is abundant but noisy. Consider a hybrid: softmax for candidate generation, explicit ratings for a separate ranking stage.
 
@@ -231,19 +238,19 @@ Canary users are synthetic — no real read timestamps. All receive `ts_max_bin`
 
 **Metrics:** Recall@K, Hit Rate@K, NDCG@K, MRR at K = 1, 5, 10, 20, 50.
 
-**Results (corpus ~11k books, random Hit Rate@10 baseline ≈ 0.09%):**
+**Results (5,000 val users, corpus ~11k books, random Hit Rate@10 baseline ≈ 0.09%):**
 
 | Metric | MSE | BPR | Softmax |
 |---|---|---|---|
-| Hit Rate@10 | 4.3% | 2.8% | **11.7%** |
-| Hit Rate@50 | 16.8% | 14.4% | **31.3%** |
-| Recall@10 | 0.0061 | 0.0033 | **0.0194** |
-| NDCG@10 | 0.0062 | 0.0036 | **0.0213** |
-| MRR | 0.021 | 0.015 | **0.057** |
+| Hit Rate@10 | 4.7% | 3.5% | **10.7%** |
+| Hit Rate@50 | 17.6% | 14.4% | **28.9%** |
+| Recall@10 | 0.0069 | 0.0041 | **0.0164** |
+| NDCG@10 | 0.0073 | 0.0042 | **0.0189** |
+| MRR | 0.024 | 0.016 | **0.053** |
 
-Softmax is ~3× better than MSE and ~4× better than BPR on Hit Rate@10.
+Softmax is ~2.3× better than MSE and ~3.1× better than BPR on Hit Rate@10.
 
-**Checkpoint naming convention:** loss type is encoded in the filename — `best_mse_*`, `best_bpr_*`, `best_softmax_*`. `_resolve_checkpoint` and `_load_model_and_embeddings` in `evaluate.py` auto-detect the correct config from the prefix.
+**Checkpoint naming convention:** loss type is encoded in the filename — `best_mse_*`, `best_bpr_*`, `best_softmax_*`. `_resolve_checkpoint` and `_load_model_and_embeddings` in `evaluate.py` auto-detect the correct config from the prefix. **Note:** `best_softmax_` checkpoints dated before 2026-04-21 were trained with `F.normalize` (cosine similarity objective). Checkpoints from 2026-04-21 onward use raw inner product, matching the YouTube DNN paper.
 
 ### YouTube DNN implementation details (Covington et al., 2016)
 
@@ -263,9 +270,9 @@ Key design decisions from the paper that directly apply to our softmax implement
 - User recency is already captured by the timestamp embedding (read month bin), which signals how recently the user's taste context was formed.
 
 **Serving (inference):**
-- At serving time, the softmax normalisation is not needed — raw dot product scores are sufficient for ranking.
-- YouTube uses ANN (approximate nearest neighbor search) because their corpus is billions of videos — you can't dot product against billions of items in real time.
-- **Our corpus is ~11k books**, so we compute all 11k dot products exactly and take the top 20. No ANN needed. This is what `_score_books` does in the Streamlit app and what `run_offline_eval` does for evaluation.
+- At serving time, rank by raw dot product `u · v` — no softmax normalisation, no L2 normalisation of embeddings. The paper uses inner product search throughout (training and inference).
+- YouTube uses ANN (approximate nearest neighbor search via MIPS) because their corpus is billions of videos. **Our corpus is ~11k books**, so we compute all 11k dot products exactly. No ANN needed.
+- **Note:** `F.normalize` on embeddings before the dot product (cosine similarity) is NOT what the paper does. It was previously in our training loop and caused a training/inference mismatch. Removed — both training and inference now use raw dot products.
 
 **Shared item ID embedding:**
 - The item ID embedding table is shared between the item tower output and the user history avg pool (we already do this). The paper does the same — a single global video embedding used for both the "what video is this" tower and the "what has the user watched" history representation.

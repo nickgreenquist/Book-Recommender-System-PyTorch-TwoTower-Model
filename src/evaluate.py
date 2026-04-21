@@ -535,7 +535,7 @@ def run_canary_eval(model: BookRecommender, fs: FeatureStore,
 
     with torch.no_grad():
         for user_type in USER_TYPE_TO_FAVORITE_GENRES:
-            user_emb   = _build_user_embedding(model, fs, user_type, ts_max_bin)
+            user_emb    = _build_user_embedding(model, fs, user_type, ts_max_bin)
             fav_books   = USER_TYPE_TO_FAVORITE_BOOKS[user_type]
             liked_books = USER_TYPE_TO_LIKED_BOOKS.get(user_type, [])
             shelf_tags  = USER_TYPE_TO_SHELF_TAGS.get(user_type, [])
