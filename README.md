@@ -3,12 +3,12 @@
 ## Live Demo
 **Demo link:** [book-recommender-system-two-tower-model.streamlit.app](https://book-recommender-system-two-tower-model.streamlit.app/)
 
+**Sibling projects:** [Movie Recommender System](https://github.com/nickgreenquist/Movie-Recommender-System-PyTorch-TwoTower-Model) · [Game Recommender System](https://github.com/nickgreenquist/Game-Recommender-System-PyTorch-TwoTower-Model)
+
 ## Introduction
 A PyTorch Two-Tower neural network trained on the [UCSD Goodreads dataset](https://cseweb.ucsd.edu/~jmcauley/datasets/goodreads.html) (~11k books, ~4.7M training examples).
 
 Trained with in-batch negatives softmax loss, following the YouTube DNN retrieval approach (Covington et al., 2016). At inference, a dot product of the user and item embeddings retrieves the most relevant books.
-
-Sibling projects: [Movie Recommender System](https://github.com/nickgreenquist/Movie-Recommender-System-PyTorch-TwoTower-Model) · [Game Recommender System](https://github.com/nickgreenquist/Game-Recommender-System-PyTorch-TwoTower-Model).
 
 ## Results
 
