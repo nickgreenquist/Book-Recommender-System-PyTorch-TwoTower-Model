@@ -67,6 +67,8 @@ def load_artifacts():
         timestamp_embedding_size=cfg['timestamp_embedding_size'],
         item_genre_embedding_size=cfg['item_genre_embedding_size'],
         item_year_embedding_size=cfg['item_year_embedding_size'],
+        proj_hidden=cfg.get('proj_hidden', 256),
+        output_dim=cfg.get('output_dim', 128),
     )
     # strict=False: model.pth excludes buffers (book_shelf_matrix, book_author_idx)
     # which are already set via the constructor above.
@@ -168,7 +170,8 @@ def _build_user_embedding(model, fs, liked_titles_with_weights, liked_genres, ts
     genre_emb = model.user_genre_tower(torch.tensor([ctx]))
     ts_emb    = model.timestamp_embedding_tower(
                     model.timestamp_embedding_lookup(ts_inference))
-    return torch.cat([history_emb, genre_emb, ts_emb], dim=1)
+    concat = torch.cat([history_emb, genre_emb, ts_emb], dim=1)
+    return model.user_projection(concat) if model.user_projection is not None else concat
 
 
 def _cover_url(bid, fs):
@@ -596,16 +599,17 @@ space: a book you liked pulls your user embedding directly toward that book's em
             "Random baseline Hit Rate@10 ≈ 0.87% (avg ~10 label books per user)."
         )
         st.markdown("""
-| Metric | MSE | BPR | **Softmax** |
-|---|---|---|---|
-| Hit Rate@10 | 4.7% | 3.5% | **10.7%** |
-| Hit Rate@50 | 17.6% | 14.4% | **28.9%** |
-| Recall@10 | 0.0069 | 0.0041 | **0.0164** |
-| NDCG@10 | 0.0073 | 0.0042 | **0.0189** |
-| MRR | 0.024 | 0.016 | **0.053** |
+| Metric | MSE | BPR | Softmax | **Softmax + Projection** |
+|---|---|---|---|---|
+| Hit Rate@10 | 4.7% | 3.5% | 10.7% | **13.0%** |
+| Hit Rate@50 | 17.6% | 14.4% | 28.9% | **33.0%** |
+| Recall@10 | 0.0069 | 0.0041 | 0.0164 | **0.0241** |
+| NDCG@10 | 0.0073 | 0.0042 | 0.0189 | **0.0255** |
+| MRR | 0.024 | 0.016 | 0.053 | **0.064** |
 """)
         st.markdown(
-            "Switching from MSE to in-batch negatives softmax improved Hit Rate@10 by **127%** and MRR by **120%**."
+            "Switching from MSE to softmax improved Hit Rate@10 by **127%**. "
+            "Adding projection MLPs to both towers improved it a further **21%** (10.7% → 13.0%)."
         )
 
         st.header("Limitations")

@@ -15,15 +15,15 @@ This is a sibling project to the [Movie Recommender System](https://github.com/n
 Offline evaluation on 5,000 held-out val users (leave-label-out protocol, corpus of ~11k books).
 Random baseline Hit Rate@10 ≈ 0.87% (avg ~10 label books per user).
 
-| Metric | MSE | BPR | **Softmax** |
-|---|---|---|---|
-| Hit Rate@10 | 4.7% | 3.5% | **10.7%** |
-| Hit Rate@50 | 17.6% | 14.4% | **28.9%** |
-| Recall@10 | 0.0069 | 0.0041 | **0.0164** |
-| NDCG@10 | 0.0073 | 0.0042 | **0.0189** |
-| MRR | 0.024 | 0.016 | **0.053** |
+| Metric | MSE | BPR | Softmax | **Softmax + Projection** |
+|---|---|---|---|---|
+| Hit Rate@10 | 4.7% | 3.5% | 10.7% | **13.0%** |
+| Hit Rate@50 | 17.6% | 14.4% | 28.9% | **33.0%** |
+| Recall@10 | 0.0069 | 0.0041 | 0.0164 | **0.0241** |
+| NDCG@10 | 0.0073 | 0.0042 | 0.0189 | **0.0255** |
+| MRR | 0.024 | 0.016 | 0.053 | **0.064** |
 
-Switching from MSE to in-batch negatives softmax improved Hit Rate@10 by **127%** and MRR by **120%**.
+Switching from MSE to softmax improved Hit Rate@10 by **127%**. Adding projection MLPs to both towers improved it a further **21%** (10.7% → 13.0%).
 
 ## Key design choices
 
@@ -34,18 +34,18 @@ Switching from MSE to in-batch negatives softmax improved Hit Rate@10 by **127%*
 
 ```
 User Tower:
-  rating_weighted_avg_pool(item_embeddings[read_history])  → 40-dim
-  user_genre_tower([avg_rating_per_genre | read_frac])     → 50-dim
-  timestamp_embedding_tower(read_month)                    → 10-dim
-  concat → 100-dim user embedding
+  rating_weighted_avg_pool(item_embeddings[read_history])  → 32-dim
+  user_genre_tower([avg_rating_per_genre | read_frac])     → 32-dim
+  timestamp_embedding_tower(read_month)                    → 8-dim
+  concat (72-dim) → projection MLP (256) → 128-dim user embedding
 
 Item Tower:
   item_genre_tower(genre_weighted)      → 10-dim
-  item_shelf_tower(tfidf_shelf_scores)  → 25-dim
-  item_embedding_tower(book_id)         → 40-dim  ← shared with user history pool
-  author_tower(primary_author_idx)      → 15-dim
-  year_embedding_tower(pub_year)        → 10-dim
-  concat → 100-dim item embedding
+  item_shelf_tower(tfidf_shelf_scores)  → 40-dim  ← richest signal: 3032-dim TF-IDF
+  item_embedding_tower(book_id)         → 32-dim  ← shared with user history pool
+  author_tower(primary_author_idx)      → 10-dim
+  year_embedding_tower(pub_year)        → 8-dim
+  concat (100-dim) → projection MLP (256) → 128-dim item embedding
 
 Prediction: dot_product(user_embedding, item_embedding)
 ```

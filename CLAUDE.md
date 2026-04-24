@@ -206,9 +206,40 @@ Canary users are synthetic — no real read timestamps. All receive `ts_max_bin`
 
 ## Immediate Next Step
 
-**Export the new softmax model** — `python main.py export saved_models/best_softmax_20260421_091656.pth`
+**Run canary + export proj_softmax model** — `python main.py canary saved_models/best_proj_softmax_20260424_082746.pth`, then `python main.py export saved_models/best_proj_softmax_20260424_082746.pth`
 
-Retrain complete (`best_softmax_20260421_091656.pth`). This model uses raw inner products, matching the YouTube DNN paper. Eval numbers updated. Run canary to verify quality, then export to update the serving artifacts for the Streamlit app.
+Projection MLP model trained and eval validated (+21% Hit Rate@10 over flat softmax). Run canary to verify recommendation quality, then export to update serving artifacts for the Streamlit app.
+
+Three changes to make together (they interact):
+
+**1. Projection MLP after each tower's concat**
+Each tower ends with a 2-layer MLP instead of passing the raw concat directly to the dot product:
+```
+concat → Linear(256) → ReLU → Linear(128) → dot product
+```
+This lets the model learn cross-feature interactions (e.g. genre × history) that a plain concat + dot product cannot express. Both towers project to the same `output_dim=128`. The old assert that `user_concat_dim == item_concat_dim` must match can be removed — only `output_dim` needs to match.
+
+**2. Smaller sub-embedding sizes**
+Sub-embedding dims were previously inflated to make the two concat sizes match. With the projection MLP absorbing that constraint, each can be sized on its own merits:
+
+| Signal | Old | New |
+|---|---|---|
+| item_id (shared) | 40 | 32 |
+| user_genre | 50 (padded to match) | 32 |
+| item_genre | 10 | 8 |
+| shelf | 25 | 16 |
+| author | 15 | 12 |
+| year | 10 | 8 |
+| timestamp | 10 | 8 |
+
+New dims: user = 32+32+8 = 72 → 256 → 128; item = 8+16+32+12+8 = 76 → 256 → 128.
+
+**3. Initialization fix (critical — model won't learn without this)**
+- Sub-tower linear layers: `gain=0.01 → 0.1`
+- Projection linear layers: re-initialized separately to `gain=1.0` after the rest of the model
+- Embedding tables: stay at `gain=0.01`
+
+Without this, the projection adds two extra layers of `gain=0.01` on top of already-small sub-tower outputs — dot products collapse to exactly zero at step 0 and the model never recovers.
 
 ## Future Improvements
 
@@ -238,19 +269,19 @@ Retrain complete (`best_softmax_20260421_091656.pth`). This model uses raw inner
 
 **Metrics:** Recall@K, Hit Rate@K, NDCG@K, MRR at K = 1, 5, 10, 20, 50.
 
-**Results (5,000 val users, corpus ~11k books, random Hit Rate@10 baseline ≈ 0.09%):**
+**Results (5,000 val users, corpus ~11k books, random Hit Rate@10 baseline ≈ 0.88%):**
 
-| Metric | MSE | BPR | Softmax |
-|---|---|---|---|
-| Hit Rate@10 | 4.7% | 3.5% | **10.7%** |
-| Hit Rate@50 | 17.6% | 14.4% | **28.9%** |
-| Recall@10 | 0.0069 | 0.0041 | **0.0164** |
-| NDCG@10 | 0.0073 | 0.0042 | **0.0189** |
-| MRR | 0.024 | 0.016 | **0.053** |
+| Metric | MSE | BPR | Softmax | **Softmax + Projection** |
+|---|---|---|---|---|
+| Hit Rate@10 | 4.7% | 3.5% | 10.7% | **13.0%** |
+| Hit Rate@50 | 17.6% | 14.4% | 28.9% | **33.0%** |
+| Recall@10 | 0.0069 | 0.0041 | 0.0164 | **0.0241** |
+| NDCG@10 | 0.0073 | 0.0042 | 0.0189 | **0.0255** |
+| MRR | 0.024 | 0.016 | 0.053 | **0.064** |
 
-Softmax is ~2.3× better than MSE and ~3.1× better than BPR on Hit Rate@10.
+Softmax + Projection is ~2.8× better than MSE and ~3.7× better than BPR on Hit Rate@10. Adding projection MLPs improved Hit Rate@10 by 21% over flat softmax (10.7% → 13.0%).
 
-**Checkpoint naming convention:** loss type is encoded in the filename — `best_mse_*`, `best_bpr_*`, `best_softmax_*`. `_resolve_checkpoint` and `_load_model_and_embeddings` in `evaluate.py` auto-detect the correct config from the prefix. **Note:** `best_softmax_` checkpoints dated before 2026-04-21 were trained with `F.normalize` (cosine similarity objective). Checkpoints from 2026-04-21 onward use raw inner product, matching the YouTube DNN paper.
+**Checkpoint naming convention:** loss type and architecture are encoded in the filename — `best_mse_*`, `best_bpr_*`, `best_softmax_*` (flat, legacy), `best_proj_softmax_*` (projection MLP). `_resolve_checkpoint` and `_load_model_and_embeddings` in `evaluate.py` auto-detect the correct config from the prefix. **Note:** `best_softmax_` checkpoints use the flat architecture (no projection) with the old embedding sizes. `best_proj_softmax_` checkpoints (2026-04-24+) use the projection MLP architecture.
 
 ### YouTube DNN implementation details (Covington et al., 2016)
 

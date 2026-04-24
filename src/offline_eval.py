@@ -97,7 +97,8 @@ def run_offline_eval(model: BookRecommender, fs: FeatureStore,
             ts_emb    = model.timestamp_embedding_tower(
                             model.timestamp_embedding_lookup(ts_max_bin))
 
-            user_emb = torch.cat([history_emb, genre_emb, ts_emb], dim=1)  # (1, 100)
+            concat   = torch.cat([history_emb, genre_emb, ts_emb], dim=1)
+            user_emb = model.user_projection(concat) if model.user_projection is not None else concat
 
             # ── Score all books ───────────────────────────────────────────────
             scores = (all_embs @ user_emb.T).squeeze(-1)  # (n_books,)

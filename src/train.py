@@ -20,42 +20,20 @@ from src.model import BookRecommender
 
 def get_config() -> dict:
     """All training hyperparameters in one place."""
-    # Shared dim (user history pool + item book tower — cannot be set independently)
-    item_id_embedding_size    = 40
-
-    # User-only
-    user_genre_embedding_size = 50
-    timestamp_embedding_size  = 10
-
-    # Item-only (shelf and author are no longer on the user side)
-    item_genre_embedding_size = 10
-    shelf_embedding_size      = 25
-    author_embedding_size     = 15
-    item_year_embedding_size  = 10
-
-    user_dim = (item_id_embedding_size + user_genre_embedding_size
-                + timestamp_embedding_size)
-    item_dim = (item_genre_embedding_size + shelf_embedding_size
-                + item_id_embedding_size + author_embedding_size
-                + item_year_embedding_size)
-    assert user_dim == item_dim, (
-        f"Tower size mismatch — user={user_dim} "
-        f"(history={item_id_embedding_size} + genre={user_genre_embedding_size} "
-        f"+ ts={timestamp_embedding_size}), "
-        f"item={item_dim} "
-        f"(genre={item_genre_embedding_size} + shelf={shelf_embedding_size} "
-        f"+ book={item_id_embedding_size} + author={author_embedding_size} "
-        f"+ year={item_year_embedding_size})"
-    )
-
     return {
-        'item_id_embedding_size':    item_id_embedding_size,
-        'author_embedding_size':     author_embedding_size,
-        'shelf_embedding_size':      shelf_embedding_size,
-        'user_genre_embedding_size': user_genre_embedding_size,
-        'timestamp_embedding_size':  timestamp_embedding_size,
-        'item_genre_embedding_size': item_genre_embedding_size,
-        'item_year_embedding_size':  item_year_embedding_size,
+        # Sub-embedding sizes — projection MLP handles cross-feature interactions,
+        # so these are sized on their own merits (no need for user_dim == item_dim).
+        'item_id_embedding_size':    32,   # shared: user history pool + item tower
+        'user_genre_embedding_size': 32,
+        'timestamp_embedding_size':  8,
+        'item_genre_embedding_size': 10,
+        'shelf_embedding_size':      40,   # richest signal: 3032-dim TF-IDF → 2-layer MLP
+        'author_embedding_size':     10,
+        'item_year_embedding_size':  8,
+        # item concat: 10+40+32+10+8 = 100; user concat: 32+32+8 = 72
+        # Projection MLP  (concat → Linear(proj_hidden) → ReLU → Linear(output_dim))
+        'proj_hidden':  256,
+        'output_dim':   128,
         # Training
         'loss':             'bpr',   # 'mse' or 'bpr'
         'lr':               0.001,
@@ -110,6 +88,8 @@ def build_model(config: dict, fs: FeatureStore) -> BookRecommender:
         timestamp_embedding_size=config['timestamp_embedding_size'],
         item_genre_embedding_size=config['item_genre_embedding_size'],
         item_year_embedding_size=config['item_year_embedding_size'],
+        proj_hidden=config.get('proj_hidden', 256),
+        output_dim=config.get('output_dim', 128),
     )
     return model
 
@@ -119,21 +99,29 @@ def print_model_summary(model: BookRecommender) -> None:
     history_dim = m.item_embedding_lookup.embedding_dim
     genre_dim   = m.user_genre_tower[-2].out_features  # last Linear before final Tanh
     ts_dim      = m.timestamp_embedding_lookup.embedding_dim
-    user_total  = history_dim + genre_dim + ts_dim
+    user_concat = history_dim + genre_dim + ts_dim
 
     item_genre_dim  = m.item_genre_tower[-2].out_features
     item_shelf_dim  = m.item_shelf_tower[-2].out_features
     item_book_dim   = m.item_embedding_tower[-2].out_features
     item_author_dim = m.author_tower[-2].out_features
     year_dim        = m.year_embedding_tower[-2].out_features
-    item_total      = item_genre_dim + item_shelf_dim + item_book_dim + item_author_dim + year_dim
+    item_concat     = item_genre_dim + item_shelf_dim + item_book_dim + item_author_dim + year_dim
 
     n_params = sum(p.nelement() for p in model.parameters() if p.requires_grad)
 
     print(f"\n── Model dimensions ──")
-    print(f"  User side:  history({history_dim}) + genre({genre_dim}) + ts({ts_dim})  =  {user_total}")
-    print(f"  Item side:  genre({item_genre_dim}) + shelf({item_shelf_dim})"
-          f" + book({item_book_dim}) + author({item_author_dim}) + year({year_dim})  =  {item_total}")
+    if m.user_projection is not None:
+        output_dim = m.output_dim
+        print(f"  User side:  history({history_dim}) + genre({genre_dim}) + ts({ts_dim})"
+              f"  =  {user_concat}  → proj →  {output_dim}")
+        print(f"  Item side:  genre({item_genre_dim}) + shelf({item_shelf_dim})"
+              f" + book({item_book_dim}) + author({item_author_dim}) + year({year_dim})"
+              f"  =  {item_concat}  → proj →  {output_dim}")
+    else:
+        print(f"  User side:  history({history_dim}) + genre({genre_dim}) + ts({ts_dim})  =  {user_concat}")
+        print(f"  Item side:  genre({item_genre_dim}) + shelf({item_shelf_dim})"
+              f" + book({item_book_dim}) + author({item_author_dim}) + year({year_dim})  =  {item_concat}")
     print(f"  Parameters: {n_params:,}")
 
 
@@ -290,27 +278,20 @@ def train(model: BookRecommender, train_data: tuple, val_data: tuple,
 
 def get_softmax_config() -> dict:
     """Hyperparameters for in-batch negatives softmax training."""
-    item_id_embedding_size    = 40
-    user_genre_embedding_size = 50
-    timestamp_embedding_size  = 10
-    item_genre_embedding_size = 10
-    shelf_embedding_size      = 25
-    author_embedding_size     = 15
-    item_year_embedding_size  = 10
-
-    user_dim = item_id_embedding_size + user_genre_embedding_size + timestamp_embedding_size
-    item_dim = (item_genre_embedding_size + shelf_embedding_size + item_id_embedding_size
-                + author_embedding_size + item_year_embedding_size)
-    assert user_dim == item_dim, f"Tower size mismatch: user={user_dim} item={item_dim}"
-
     return {
-        'item_id_embedding_size':    item_id_embedding_size,
-        'author_embedding_size':     author_embedding_size,
-        'shelf_embedding_size':      shelf_embedding_size,
-        'user_genre_embedding_size': user_genre_embedding_size,
-        'timestamp_embedding_size':  timestamp_embedding_size,
-        'item_genre_embedding_size': item_genre_embedding_size,
-        'item_year_embedding_size':  item_year_embedding_size,
+        # Sub-embedding sizes — projection MLP handles cross-feature interactions,
+        # so these are sized on their own merits (no need for user_dim == item_dim).
+        'item_id_embedding_size':    32,   # shared: user history pool + item tower
+        'user_genre_embedding_size': 32,
+        'timestamp_embedding_size':  8,
+        'item_genre_embedding_size': 10,
+        'shelf_embedding_size':      40,   # richest signal: 3032-dim TF-IDF → 2-layer MLP
+        'author_embedding_size':     10,
+        'item_year_embedding_size':  8,
+        # item concat: 10+40+32+10+8 = 100; user concat: 32+32+8 = 72
+        # Projection MLP  (concat → Linear(proj_hidden) → ReLU → Linear(output_dim))
+        'proj_hidden':  256,
+        'output_dim':   128,
         # Training
         'lr':               0.001,
         'weight_decay':     1e-5,   # lighter than BPR (1e-4 was for collapse prevention, not needed with softmax)
@@ -320,6 +301,22 @@ def get_softmax_config() -> dict:
         'log_every':        10_000,
         'checkpoint_every': 30_000,
         'checkpoint_dir':   'saved_models',
+    }
+
+
+def get_softmax_config_legacy() -> dict:
+    """Config for flat softmax checkpoints trained before the projection MLP (pre-2026-04-24).
+    proj_hidden=None → model outputs raw concat directly to dot product (no projection layers)."""
+    return {
+        'item_id_embedding_size':    40,
+        'user_genre_embedding_size': 50,
+        'timestamp_embedding_size':  10,
+        'item_genre_embedding_size': 10,
+        'shelf_embedding_size':      25,
+        'author_embedding_size':     15,
+        'item_year_embedding_size':  10,
+        'proj_hidden':               None,
+        'output_dim':                None,
     }
 
 
@@ -366,7 +363,7 @@ def train_softmax(model: BookRecommender, train_data: tuple, val_data: tuple,
     os.makedirs(checkpoint_dir, exist_ok=True)
     run_timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
     best_val_loss = float('inf')
-    best_path     = os.path.join(checkpoint_dir, f'best_softmax_{run_timestamp}.pth')
+    best_path     = os.path.join(checkpoint_dir, f'best_proj_softmax_{run_timestamp}.pth')
 
     loss_train = []
 
@@ -421,7 +418,7 @@ def train_softmax(model: BookRecommender, train_data: tuple, val_data: tuple,
 
             if i > 0 and i % checkpoint_every == 0:
                 periodic = os.path.join(checkpoint_dir,
-                                        f'softmax_{run_timestamp}_step_{i:06d}.pth')
+                                        f'proj_softmax_{run_timestamp}_step_{i:06d}.pth')
                 torch.save(model.state_dict(), periodic)
                 print(f"  → periodic checkpoint → {periodic}")
         else:

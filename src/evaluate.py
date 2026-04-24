@@ -14,7 +14,8 @@ import torch
 import torch.nn.functional as F
 from src.dataset import FeatureStore
 from src.model import BookRecommender
-from src.train import build_model, get_config, get_softmax_config, print_model_summary
+from src.train import (build_model, get_config, get_softmax_config,
+                        get_softmax_config_legacy, print_model_summary)
 
 
 # ── Canary user definitions ───────────────────────────────────────────────────
@@ -404,7 +405,9 @@ def build_book_embeddings(model: BookRecommender, fs: FeatureStore) -> dict:
     book_all   = torch.cat(book_embs,   dim=0)
     author_all = torch.cat(author_embs, dim=0)
     year_all   = torch.cat(year_embs,   dim=0)
-    combined   = torch.cat([genre_all, shelf_all, book_all, author_all, year_all], dim=1)
+    concat = torch.cat([genre_all, shelf_all, book_all, author_all, year_all], dim=1)
+    with torch.no_grad():
+        combined = model.item_projection(concat) if model.item_projection is not None else concat
 
     bookId_to_embedding = {}
     for i, bid in enumerate(fs.top_books):
@@ -519,7 +522,8 @@ def _build_user_embedding(model: BookRecommender, fs: FeatureStore, user_type: s
     genre_emb = model.user_genre_tower(X_inf)
     ts_emb    = model.timestamp_embedding_tower(model.timestamp_embedding_lookup(ts_inference))
 
-    return torch.cat([history_emb, genre_emb, ts_emb], dim=1)
+    concat = torch.cat([history_emb, genre_emb, ts_emb], dim=1)
+    return model.user_projection(concat) if model.user_projection is not None else concat
 
 
 def run_canary_eval(model: BookRecommender, fs: FeatureStore,
@@ -736,6 +740,7 @@ def _resolve_checkpoint(checkpoint_path: str, checkpoint_dir: str):
         return checkpoint_path
     candidates = sorted(
         glob.glob(os.path.join(checkpoint_dir, 'best_checkpoint_*.pth')) +
+        glob.glob(os.path.join(checkpoint_dir, 'best_proj_softmax_*.pth')) +
         glob.glob(os.path.join(checkpoint_dir, 'best_softmax_*.pth'))    +
         glob.glob(os.path.join(checkpoint_dir, 'best_bpr_*.pth'))        +
         glob.glob(os.path.join(checkpoint_dir, 'best_mse_*.pth')),
@@ -750,7 +755,12 @@ def _resolve_checkpoint(checkpoint_path: str, checkpoint_dir: str):
 def _load_model_and_embeddings(checkpoint_path: str, fs):
     """Build model, load weights, pre-compute book embeddings."""
     basename = os.path.basename(checkpoint_path)
-    config = get_softmax_config() if basename.startswith('best_softmax_') or basename.startswith('softmax_') else get_config()
+    if basename.startswith('best_proj_softmax_') or basename.startswith('proj_softmax_'):
+        config = get_softmax_config()
+    elif basename.startswith('best_softmax_') or basename.startswith('softmax_'):
+        config = get_softmax_config_legacy()
+    else:
+        config = get_config()
     print(f"Loading checkpoint: {checkpoint_path}")
     state_dict = torch.load(checkpoint_path, weights_only=True)
     model = build_model(config, fs)
