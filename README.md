@@ -8,7 +8,7 @@ A PyTorch Two-Tower neural network trained on the [UCSD Goodreads dataset](https
 
 Trained with in-batch negatives softmax loss, following the YouTube DNN retrieval approach (Covington et al., 2016). At inference, a dot product of the user and item embeddings retrieves the most relevant books.
 
-This is a sibling project to the [Movie Recommender System](https://github.com/nickgreenquist/Movie-Recommender-System-PyTorch-TwoTower-Model).
+Sibling projects: [Movie Recommender System](https://github.com/nickgreenquist/Movie-Recommender-System-PyTorch-TwoTower-Model) · [Game Recommender System](https://github.com/nickgreenquist/Game-Recommender-System-PyTorch-TwoTower-Model).
 
 ## Results
 
