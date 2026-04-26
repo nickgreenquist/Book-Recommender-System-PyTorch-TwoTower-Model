@@ -38,6 +38,7 @@ USER_TYPE_TO_FAVORITE_GENRES = {
     'NonFiction Lover':   ['non-fiction'],
     'Economics Lover':  [],
     'Manga Lover':      [],  # no manga genre in vocab — relies on shelf tags + books
+    'Religion Book Reader': [],
     'Poetry Lover':     ['poetry'],
     "Children's Book Lover": ['children'],
 }
@@ -55,6 +56,7 @@ USER_TYPE_TO_WORST_GENRES = {
     'NonFiction Lover':  [],
     'Economics Lover': [],
     'Manga Lover':     [],
+    'Religion Book Reader': [],
     'Poetry Lover':    [],
     "Children's Book Lover": [],
 }
@@ -190,6 +192,14 @@ USER_TYPE_TO_FAVORITE_BOOKS = {
         'Bleach, Volume 01',
         'Hunter x Hunter, Vol. 01 (Hunter x Hunter, #1)',
         'One Piece, Volume 01: Romance Dawn (One Piece, #1)'
+    ],
+    'Religion Book Reader': [
+        'Holy Bible: New International Version',
+        'Crazy Love: Overwhelmed by a Relentless God',
+        'The Red Tent',
+        'Siddhartha',
+        'الرحيق المختوم',
+        'Orthodoxy'
     ],
     'Poetry Lover': [
         'Leaves of Grass',
@@ -334,6 +344,7 @@ USER_TYPE_TO_LIKED_BOOKS = {
     'NonFiction Lover':       [],
     'Economics Lover':        [],
     'Manga Lover':            [],
+    'Religion Book Reader':   [],
     'Poetry Lover':           [],
     "Children's Book Lover":  [],
 }
@@ -351,6 +362,7 @@ USER_TYPE_TO_SHELF_TAGS = {
     'NonFiction Lover':  ['non-fiction'],
     'Economics Lover': ['economics'],
     'Manga Lover':     ['shonen'],
+    'Religion Book Reader': ['religion'],
     'Poetry Lover':    ['poetry'],
     "Children's Book Lover": ['childrens', 'children-s', 'picture-books'],
 }
