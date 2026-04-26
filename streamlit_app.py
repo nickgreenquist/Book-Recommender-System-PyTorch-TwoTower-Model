@@ -60,6 +60,9 @@ def load_artifacts():
         user_context_size=fs['user_context_size'],
         book_shelf_matrix=fs['book_shelf_matrix'],
         book_author_idx=fs['book_author_idx'],
+        book_genre_matrix=fs.get('book_genre_matrix'),
+        book_year_idx=fs.get('book_year_idx'),
+        use_item_pool_for_history=cfg.get('use_item_pool_for_history', False),
         item_id_embedding_size=cfg['item_id_embedding_size'],
         author_embedding_size=cfg['author_embedding_size'],
         shelf_embedding_size=cfg['shelf_embedding_size'],
@@ -124,8 +127,7 @@ def _build_user_embedding(model, fs, liked_titles_with_weights, liked_genres, ts
     n_genres = len(fs['genres_ordered'])
     ctx = [0.0] * (2 * n_genres)
 
-    # Derive genre context from liked books — ensures ctx is informative even
-    # when the user skips the explicit genre selector.
+    # Derive genre context from liked books
     genre_rating_sum  = {}
     genre_book_count  = {}
     total_books = 0
@@ -151,7 +153,7 @@ def _build_user_embedding(model, fs, liked_titles_with_weights, liked_genres, ts
             ctx[fs['genre_to_i'][g]]            = _LIKED_GENRE
             ctx[n_genres + fs['genre_to_i'][g]] = 1.0 / max(len(liked_genres), 1)
 
-    # History pool — rating-weighted avg of book embeddings
+    # History
     history = [
         (fs['bookId_to_idx'][fs['title_to_bookId'][t]], w)
         for t, w in liked_titles_with_weights
@@ -159,19 +161,14 @@ def _build_user_embedding(model, fs, liked_titles_with_weights, liked_genres, ts
     ]
 
     if history:
-        hist_ids = torch.tensor([h[0] for h in history], dtype=torch.long).unsqueeze(0)
-        hist_wts = torch.tensor([[h[1] for h in history]], dtype=torch.float)
-        hist_embs   = model.item_embedding_lookup(hist_ids)
-        wt_sum      = hist_wts.unsqueeze(-1).abs().sum(dim=1).clamp(min=1e-6)
-        history_emb = (hist_embs * hist_wts.unsqueeze(-1)).sum(dim=1) / wt_sum
+        hist_idx_t = torch.tensor([[h[0] for h in history]], dtype=torch.long)
+        hist_wts_t = torch.tensor([[h[1] for h in history]], dtype=torch.float)
     else:
-        history_emb = torch.zeros(1, model.item_embedding_lookup.embedding_dim)
+        hist_idx_t = torch.full((1, 1), model.book_pad_idx, dtype=torch.long)
+        hist_wts_t = torch.zeros(1, 1)
 
-    genre_emb = model.user_genre_tower(torch.tensor([ctx]))
-    ts_emb    = model.timestamp_embedding_tower(
-                    model.timestamp_embedding_lookup(ts_inference))
-    concat = torch.cat([history_emb, genre_emb, ts_emb], dim=1)
-    return model.user_projection(concat) if model.user_projection is not None else concat
+    X_inf = torch.tensor([ctx])
+    return model.user_embedding(X_inf, hist_idx_t, hist_wts_t, ts_inference)
 
 
 def _cover_url(bid, fs):
@@ -549,12 +546,12 @@ def tab_about():
         st.header("User Tower")
         st.markdown(
             "Each component encodes a different aspect of taste into a fixed-size vector. "
-            "All three are concatenated into a single 100-dim user embedding."
+            "All three are concatenated then projected through a 2-layer MLP to a 128-dim user embedding."
         )
         st.markdown("""
 | Component | Input | What it learns |
 |---|---|---|
-| Rating-Weighted Avg Pool | Read history — book IDs weighted by ratings | Collaborative taste — liked books pull the user toward similar items in embedding space |
+| Item Tower Avg Pool | Read history — full 128-dim item embeddings weighted by ratings | Collaborative taste — pools the complete item tower output (genre + shelf + ID + author + year) over all read books |
 | user_genre_tower | Avg rating per genre + read fraction per genre | Genre affinity — how strongly you lean toward each of the broad genre categories |
 | timestamp_embedding_tower | Month bin of most recent read activity | Temporal context — captures when in time the user's taste signal was formed |
 """, unsafe_allow_html=True)
@@ -599,17 +596,18 @@ space: a book you liked pulls your user embedding directly toward that book's em
             "Random baseline Hit Rate@10 ≈ 0.87% (avg ~10 label books per user)."
         )
         st.markdown("""
-| Metric | MSE | BPR | Softmax | **Softmax + Projection** |
-|---|---|---|---|---|
-| Hit Rate@10 | 4.7% | 3.5% | 10.7% | **13.0%** |
-| Hit Rate@50 | 17.6% | 14.4% | 28.9% | **33.0%** |
-| Recall@10 | 0.0069 | 0.0041 | 0.0164 | **0.0241** |
-| NDCG@10 | 0.0073 | 0.0042 | 0.0189 | **0.0255** |
-| MRR | 0.024 | 0.016 | 0.053 | **0.064** |
+| Metric | MSE | BPR | Softmax | Softmax + Projection | **+ Item Tower Pool** |
+|---|---|---|---|---|---|
+| Hit Rate@10 | 4.7% | 3.5% | 10.7% | 13.0% | **14.0%** |
+| Hit Rate@50 | 17.6% | 14.4% | 28.9% | 33.0% | **36.3%** |
+| Recall@10 | 0.0069 | 0.0041 | 0.0164 | 0.0241 | **0.0258** |
+| NDCG@10 | 0.0073 | 0.0042 | 0.0189 | 0.0255 | **0.0274** |
+| MRR | 0.024 | 0.016 | 0.053 | 0.064 | **0.067** |
 """)
         st.markdown(
             "Switching from MSE to softmax improved Hit Rate@10 by **127%**. "
-            "Adding projection MLPs to both towers improved it a further **21%** (10.7% → 13.0%)."
+            "Adding projection MLPs improved it a further **21%** (10.7% → 13.0%). "
+            "Replacing the id-pool in the user tower with full item tower pooling added another **8%** (13.0% → 14.0%)."
         )
 
         st.header("Limitations")

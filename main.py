@@ -118,7 +118,7 @@ def cmd_eval(checkpoint_path=None):
         return
     print("Loading features ...")
     fs = load_features(DATA_DIR, VERSION)
-    model, _, _, _, _, _ = _load_model_and_embeddings(cp, fs)
+    model, _, _, _, _, _, _ = _load_model_and_embeddings(cp, fs)
     run_offline_eval(model, fs, checkpoint_path=cp)
 
 

@@ -23,7 +23,7 @@ import torch
 
 from src.dataset import load_features
 from src.evaluate import build_book_embeddings
-from src.train import build_model, get_config, get_softmax_config
+from src.train import build_model, get_config, get_softmax_config, get_softmax_config_legacy
 
 SERVING_DIR = 'serving'
 
@@ -33,7 +33,9 @@ def run_export(data_dir: str = 'data', checkpoint_path: str = None,
     # ── Resolve checkpoint ────────────────────────────────────────────────────
     if checkpoint_path is None:
         candidates = sorted(
-            glob.glob(os.path.join('saved_models', 'best_softmax_*.pth')) +
+            glob.glob(os.path.join('saved_models', 'best_proj_softmax_ipool_*.pth')) +
+            glob.glob(os.path.join('saved_models', 'best_proj_softmax_*.pth'))       +
+            glob.glob(os.path.join('saved_models', 'best_softmax_*.pth'))             +
             glob.glob(os.path.join('saved_models', 'best_checkpoint_*.pth')),
             key=os.path.getmtime, reverse=True,
         )
@@ -44,7 +46,16 @@ def run_export(data_dir: str = 'data', checkpoint_path: str = None,
 
     print(f"Checkpoint: {checkpoint_path}")
     basename = os.path.basename(checkpoint_path)
-    config   = get_softmax_config() if basename.startswith('best_softmax_') else get_config()
+    if 'ipool' in basename:
+        config = get_softmax_config()
+        config['use_item_pool_for_history'] = True
+    elif basename.startswith(('best_proj_softmax_', 'proj_softmax_')):
+        config = get_softmax_config()
+        config['use_item_pool_for_history'] = False
+    elif basename.startswith(('best_softmax_', 'softmax_')):
+        config = get_softmax_config_legacy()
+    else:
+        config = get_config()
 
     print("Loading features ...")
     fs = load_features(data_dir, version)
@@ -96,6 +107,7 @@ def run_export(data_dir: str = 'data', checkpoint_path: str = None,
     n_books   = len(fs.top_books)
     n_shelves = len(fs.shelves_ordered)
     n_authors = len(fs.authors_ordered)
+    n_genres  = len(fs.genres_ordered)
 
     shelf_matrix = np.array(
         [fs.bookId_to_shelf_context[bid] for bid in fs.top_books],
@@ -112,6 +124,16 @@ def run_export(data_dir: str = 'data', checkpoint_path: str = None,
         dtype=np.int64,
     )
     book_author_idx = torch.from_numpy(np.append(author_idx_arr, n_authors))
+
+    # Non-persistent buffers — required at serving time for use_item_pool_for_history=True
+    genre_matrix = np.array(
+        [fs.bookId_to_genre_context[bid] for bid in fs.top_books], dtype=np.float32)
+    book_genre_matrix = torch.from_numpy(
+        np.vstack([genre_matrix, np.zeros((1, n_genres), dtype=np.float32)]))
+    year_array = np.array(
+        [fs.year_to_i.get(fs.bookId_to_year[bid], 0) for bid in fs.top_books], dtype=np.int64)
+    book_year_idx = torch.from_numpy(
+        np.concatenate([year_array, np.zeros((1,), dtype=np.int64)]))
 
     # ── feature_store.pt ──────────────────────────────────────────────────────
     feature_store = {
@@ -141,8 +163,11 @@ def run_export(data_dir: str = 'data', checkpoint_path: str = None,
             for bid, v in fs.bookId_to_genre_context.items()
         },
         # Registered buffers (excluded from model.pth)
-        'book_shelf_matrix': book_shelf_matrix,
-        'book_author_idx':   book_author_idx,
+        'book_shelf_matrix':  book_shelf_matrix,
+        'book_author_idx':    book_author_idx,
+        # Non-persistent buffers — needed at serving time for ipool models
+        'book_genre_matrix':  book_genre_matrix,
+        'book_year_idx':      book_year_idx,
         # Derived constants
         'user_context_size':  fs.user_context_size,
         'timestamp_num_bins': fs.timestamp_num_bins,
