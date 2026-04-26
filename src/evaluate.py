@@ -36,6 +36,7 @@ USER_TYPE_TO_FAVORITE_GENRES = {
     'Sci-Fi Lover':       [],  # no sci-fi genre in vocab — relies on shelf tags + books
     'NonFiction Lover':   ['non-fiction'],
     'Economics Lover':  [],
+    'Philosophy & Existentialist Thinker': [],
     'Graphic Novel/Comic Lover': ['comics, graphic'],
     'Manga Lover':      [],
     'Religion Book Reader': [],
@@ -55,6 +56,7 @@ USER_TYPE_TO_WORST_GENRES = {
     'Sci-Fi Lover':      [],
     'NonFiction Lover':  [],
     'Economics Lover': [],
+    'Philosophy & Existentialist Thinker': [],
     'Graphic Novel/Comic Lover': [],
     'Manga Lover':     [],
     'Religion Book Reader': [],
@@ -185,6 +187,13 @@ USER_TYPE_TO_FAVORITE_BOOKS = {
         'The Intelligent Investor',
         'The Wealth of Nations',
         'Capital in the Twenty-First Century',
+    ],
+    'Philosophy & Existentialist Thinker': [
+        'The Republic',
+        'The Stranger',
+        'Thus Spoke Zarathustra',
+        'The Myth of Sisyphus and Other Essays',
+        'Meditations',
     ],
     'Graphic Novel/Comic Lover': [
         'Watchmen',
@@ -349,6 +358,7 @@ USER_TYPE_TO_LIKED_BOOKS = {
     'Sci-Fi Lover':           [],
     'NonFiction Lover':       [],
     'Economics Lover':        [],
+    'Philosophy & Existentialist Thinker': [],
     'Manga Lover':            [],
     'Religion Book Reader':   [],
     'Poetry Lover':           [],
