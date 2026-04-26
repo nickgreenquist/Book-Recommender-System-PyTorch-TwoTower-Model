@@ -275,29 +275,20 @@ BPR_NEG_THRESHOLD = -0.5   # debiased rating below this → negative
 def build_dataset(users: list, fs: FeatureStore) -> tuple:
     """
     Build training/validation tensors for a list of user IDs.
-    Returns a tuple of 10 elements:
+    Returns a 7-tuple:
       [0] X_genre, [1] X_history (list), [2] X_history_ratings (list),
       [3] timestamp, [4] Y, [5] target_book_idx,
-      [6] target_genre_context, [7] target_year, [8] target_author_idx,
-      [9] bpr_pairs — LongTensor (N_pairs, 2): same-user (pos_row, neg_row) index pairs
-
-    Indices 0-8 are unchanged from v1 — existing MSE training code is unaffected.
+      [6] bpr_pairs — LongTensor (N_pairs, 2): same-user (pos_row, neg_row) index pairs
+    target_genre/year/author_idx are NOT stored — looked up from model buffers at forward time.
     bpr_pairs uses BPR_POS_THRESHOLD / BPR_NEG_THRESHOLD on debiased Y values.
-
-    Note: shelf context is NOT stored per sample — neither user-side nor item-side.
-    The model looks up shelf vectors from book_shelf_matrix (registered buffer) using
-    read_history and target_book_idx at forward pass time.
     """
-    X_genre               = []
-    X_history             = []
-    X_history_ratings     = []
-    timestamp             = []
-    Y                     = []
-    target_book_idx       = []
-    target_genre_context  = []
-    target_year           = []
-    target_author_idx     = []
-    user_rows             = {}   # user → list of row indices (for BPR pairing)
+    X_genre           = []
+    X_history         = []
+    X_history_ratings = []
+    timestamp         = []
+    Y                 = []
+    target_book_idx   = []
+    user_rows         = {}   # user → list of row indices (for BPR pairing)
 
     from tqdm import tqdm
     for user in tqdm(users, desc="Collecting samples"):
@@ -312,9 +303,6 @@ def build_dataset(users: list, fs: FeatureStore) -> tuple:
             timestamp.append(fs.user_to_book_to_timestamp_LABEL[user][book_id])
             Y.append(float(rating) - fs.user_to_avg_rating[user])
             target_book_idx.append(fs.bookId_to_idx[book_id])
-            target_genre_context.append(fs.bookId_to_genre_context[book_id])
-            target_year.append(fs.year_to_i.get(fs.bookId_to_year[book_id], 0))
-            target_author_idx.append(fs.bookId_to_author_idx[book_id])
             user_row_indices.append(row_idx)
         if user_row_indices:
             user_rows[user] = user_row_indices
@@ -322,20 +310,13 @@ def build_dataset(users: list, fs: FeatureStore) -> tuple:
     n = len(Y)
     print(f"  {n:,} samples — building tensors ...")
 
-    print("  X_genre, Y ...")
-    X_genre_t = torch.from_numpy(np.array(X_genre, dtype=np.float32))
-    Y_t       = torch.from_numpy(np.array(Y,       dtype=np.float32))
-
-    print("  target_book_idx, year, author, timestamp ...")
-    target_book_idx_t  = torch.from_numpy(np.array(target_book_idx,  dtype=np.int64))
-    target_year_t      = torch.from_numpy(np.array(target_year,      dtype=np.int64))
-    target_author_idx_t = torch.from_numpy(np.array(target_author_idx, dtype=np.int64))
-    timestamp_t = torch.bucketize(
+    print("  X_genre, Y, target_book_idx, timestamp ...")
+    X_genre_t         = torch.from_numpy(np.array(X_genre,        dtype=np.float32))
+    Y_t               = torch.from_numpy(np.array(Y,              dtype=np.float32))
+    target_book_idx_t = torch.from_numpy(np.array(target_book_idx, dtype=np.int64))
+    timestamp_t       = torch.bucketize(
         torch.from_numpy(np.array(timestamp, dtype=np.float64)).float(),
         fs.timestamp_bins.float(), right=False)
-
-    print("  genre context ...")
-    target_genre_t = torch.from_numpy(np.array(target_genre_context, dtype=np.float32))
 
     print("  BPR pairs ...")
     Y_arr = np.array(Y, dtype=np.float32)
@@ -350,9 +331,7 @@ def build_dataset(users: list, fs: FeatureStore) -> tuple:
     print(f"  {len(bpr_pairs):,} BPR pairs from {sum(1 for r in user_rows.values() if any(Y_arr[i] > BPR_POS_THRESHOLD for i in r) and any(Y_arr[i] < BPR_NEG_THRESHOLD for i in r)):,} users with both pos and neg labels")
 
     return (X_genre_t, X_history, X_history_ratings, timestamp_t, Y_t,
-            target_book_idx_t, target_genre_t,
-            target_year_t, target_author_idx_t,
-            bpr_pairs_t)
+            target_book_idx_t, bpr_pairs_t)
 
 
 # ── Disk cache helpers ────────────────────────────────────────────────────────
@@ -371,6 +350,11 @@ def load_splits(data_dir: str = 'data', version: str = 'v1') -> tuple:
     train_data = torch.load(train_path, weights_only=False)
     print(f"Loading {val_path} ...")
     val_data   = torch.load(val_path, weights_only=False)
+    # Old files were 10-tuples (indices 6-8 = genre/year/author, 9 = bpr_pairs).
+    # New files are 7-tuples (indices 0-5 same, 6 = bpr_pairs).
+    if len(train_data) == 10:
+        train_data = train_data[:6] + (train_data[9],)
+        val_data   = val_data[:6]   + (val_data[9],)
     return train_data, val_data
 
 
@@ -441,15 +425,14 @@ def build_softmax_dataset(users: list, fs: FeatureStore, raw_df,
 
     raw_df must have columns: user_id, book_id, rating (raw 1-5), timestamp (unix seconds).
 
-    Returns 8-tuple (same structure as BPR dataset indices 0-7, no Y, no bpr_pairs):
+    Returns 5-tuple:
         [0] X_genre            — (N, user_context_size) float
         [1] X_history          — list[list[int]]  padded at training time
         [2] X_history_ratings  — list[list[float]]
         [3] timestamp          — (N,) long  (binned)
         [4] target_book_idx    — (N,) long
-        [5] target_genre       — (N, n_genres) float
-        [6] target_year        — (N,) long
-        [7] target_author_idx  — (N,) long
+    target_genre/year/author_idx are NOT stored — looked up from model buffers
+    at training time using target_book_idx as the corpus index.
     """
     from src.features import MAX_HISTORY_LEN
     rng       = random.Random(seed)
@@ -470,14 +453,11 @@ def build_softmax_dataset(users: list, fs: FeatureStore, raw_df,
     df = df.sort_values(['user_id', 'timestamp'])
     print(f"  {df['user_id'].nunique():,} users")
 
-    X_genre               = []
-    X_history             = []
-    X_history_ratings     = []
-    timestamps_raw        = []
-    target_book_idx       = []
-    target_genre_context  = []
-    target_year           = []
-    target_author_idx     = []
+    X_genre           = []
+    X_history         = []
+    X_history_ratings = []
+    timestamps_raw    = []
+    target_book_idx   = []
 
     from tqdm import tqdm
     n_users = df['user_id'].nunique()
@@ -524,9 +504,6 @@ def build_softmax_dataset(users: list, fs: FeatureStore, raw_df,
                 X_history_ratings.append(ctx_rats_buf[-max_hist:])
                 timestamps_raw.append(ts)
                 target_book_idx.append(t_idx)
-                target_genre_context.append(fs.bookId_to_genre_context[bid])
-                target_year.append(fs.year_to_i.get(fs.bookId_to_year[bid], 0))
-                target_author_idx.append(fs.bookId_to_author_idx[bid])
 
             # Update accumulators and context buffer with current book
             ctx_ids_buf.append(fs.bookId_to_idx[bid])
@@ -538,17 +515,13 @@ def build_softmax_dataset(users: list, fs: FeatureStore, raw_df,
     n = len(target_book_idx)
     print(f"  {n:,} softmax examples — building tensors ...")
 
-    X_genre_t          = torch.from_numpy(np.array(X_genre,              dtype=np.float32))
-    target_book_idx_t  = torch.from_numpy(np.array(target_book_idx,      dtype=np.int64))
-    target_year_t      = torch.from_numpy(np.array(target_year,          dtype=np.int64))
-    target_author_idx_t = torch.from_numpy(np.array(target_author_idx,   dtype=np.int64))
-    target_genre_t     = torch.from_numpy(np.array(target_genre_context, dtype=np.float32))
-    timestamp_t        = torch.bucketize(
+    X_genre_t         = torch.from_numpy(np.array(X_genre,        dtype=np.float32))
+    target_book_idx_t = torch.from_numpy(np.array(target_book_idx, dtype=np.int64))
+    timestamp_t       = torch.bucketize(
         torch.from_numpy(np.array(timestamps_raw, dtype=np.float64)).float(),
         fs.timestamp_bins.float(), right=False)
 
-    return (X_genre_t, X_history, X_history_ratings, timestamp_t,
-            target_book_idx_t, target_genre_t, target_year_t, target_author_idx_t)
+    return (X_genre_t, X_history, X_history_ratings, timestamp_t, target_book_idx_t)
 
 
 def make_softmax_splits(fs: FeatureStore, data_dir: str = 'data',
@@ -606,8 +579,8 @@ def load_softmax_splits(data_dir: str = 'data', version: str = 'v1') -> tuple:
     train_data = torch.load(train_path, weights_only=False)
     print(f"Loading {val_path} ...")
     val_data   = torch.load(val_path, weights_only=False)
-
-    return train_data, val_data
+    # Old files were 8-tuples; new files are 5-tuples. Slice for backward compat.
+    return train_data[:5], val_data[:5]
 
 
 # ── Train / val split ─────────────────────────────────────────────────────────

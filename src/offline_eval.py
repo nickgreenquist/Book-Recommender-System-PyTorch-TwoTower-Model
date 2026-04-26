@@ -84,21 +84,10 @@ def run_offline_eval(model: BookRecommender, fs: FeatureStore,
                 continue
 
             # ── Build user embedding ──────────────────────────────────────────
-            hist_idx_t = torch.tensor(hist_indices, dtype=torch.long).unsqueeze(0)
-            hist_wts_t = torch.tensor([hist_ratings], dtype=torch.float)
-            rat_wts    = hist_wts_t.unsqueeze(-1)                  # (1, hist, 1)
-            wt_sum     = rat_wts.abs().sum(dim=1).clamp(min=1e-6)  # (1, 1)
-
-            hist_embs   = model.item_embedding_lookup(hist_idx_t)  # (1, hist, D)
-            history_emb = (hist_embs * rat_wts).sum(dim=1) / wt_sum  # (1, D)
-
-            genre_ctx = fs.user_to_genre_context[user]
-            genre_emb = model.user_genre_tower(torch.tensor([genre_ctx]))
-            ts_emb    = model.timestamp_embedding_tower(
-                            model.timestamp_embedding_lookup(ts_max_bin))
-
-            concat   = torch.cat([history_emb, genre_emb, ts_emb], dim=1)
-            user_emb = model.user_projection(concat) if model.user_projection is not None else concat
+            hist_idx_t  = torch.tensor(hist_indices, dtype=torch.long).unsqueeze(0)  # (1, hist)
+            hist_wts_t  = torch.tensor([hist_ratings], dtype=torch.float)             # (1, hist)
+            genre_ctx_t = torch.tensor([fs.user_to_genre_context[user]])
+            user_emb    = model.user_embedding(genre_ctx_t, hist_idx_t, hist_wts_t, ts_max_bin)
 
             # ── Score all books ───────────────────────────────────────────────
             scores = (all_embs @ user_emb.T).squeeze(-1)  # (n_books,)

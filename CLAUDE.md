@@ -313,6 +313,10 @@ Key design decisions from the paper that directly apply to our softmax implement
 - The final user embedding dimension = the item embedding dimension (they must match for dot product). The softmax weight matrix is shape `(n_books, embedding_dim)` — each row is an item embedding.
 - Out-of-vocabulary items map to a zero embedding (already our behavior for unknown authors).
 
+**Full item tower pooling (`use_item_pool_for_history=True`) — training speed:** Running `_item_pool()` calls `item_embedding()` on every book in every user's history each step. The 3032-dim shelf MLP dominates cost — with batch=512 and ~8 history books avg, this is ~8x more shelf MLP calls than the target-side alone, causing ~8x training slowdown. Possible improvement: pre-compute item embeddings for all ~11k books every N steps, use those frozen embeddings for history pooling, and only run the live item tower on the target side (where gradients matter most). Gradients would still flow to the item tower through the target path; history pool would use embeddings that are up to N steps stale.
+
+**Dataset RAM fix ✅ (2026-04-26):** Stripped redundant per-sample item feature tensors (`target_genre`, `target_year`, `target_author_idx`) from both dataset builders. The model now looks these up from non-persistent registered buffers (`book_genre_matrix`, `book_year_idx`) at training time using `target_book_idx`. Softmax dataset is now a 5-tuple (was 8-tuple); BPR/MSE is a 7-tuple (was 10-tuple). Backward-compat slices in the loaders mean old `.pt` files still work without regenerating. Result: python3 RAM during training dropped from ~33 GB to ~17 GB; memory pressure on Mac went from red to green.
+
 **Known approximations in the softmax dataset (dataset.py `build_softmax_dataset`):**
 - Genre context is computed correctly from only the rollback context (no future leakage). ✓
 - `avg_rat` (used for rating debiasing in the history pool) uses the user's full-history average, not the rollback-slice average. Technically it should be recomputed from only the rollback books to avoid any future leakage. Low priority since the average changes slowly and has minor impact.

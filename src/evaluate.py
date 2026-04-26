@@ -364,50 +364,41 @@ ANCHORS_PER_TAG             = 5
 
 def build_book_embeddings(model: BookRecommender, fs: FeatureStore) -> dict:
     """
-    Pre-compute all book combined embeddings for fast recommendation scoring.
+    Pre-compute all book embeddings for recommendation scoring and probes.
     Returns book_id → {'BOOK_EMBEDDING_COMBINED': Tensor, ...}
-    Batched for efficiency.
     """
     model.eval()
     n_books    = len(fs.top_books)
     batch_size = 512
+    all_book_idxs = torch.tensor(list(range(n_books)), dtype=torch.long)
 
-    all_book_idxs    = torch.tensor(list(range(n_books)), dtype=torch.long)
-    all_genre_ctx    = torch.tensor(
-        [fs.bookId_to_genre_context[bid] for bid in fs.top_books], dtype=torch.float32
-    )
-    all_year_idxs    = torch.tensor(
-        [fs.year_to_i.get(fs.bookId_to_year[bid], 0) for bid in fs.top_books], dtype=torch.long
-    )
-
-    genre_embs  = []
-    shelf_embs  = []
-    book_embs   = []
-    author_embs = []
-    year_embs   = []
+    genre_embs    = []
+    shelf_embs    = []
+    book_embs     = []
+    author_embs   = []
+    year_embs     = []
+    combined_embs = []
 
     with torch.no_grad():
         for start in range(0, n_books, batch_size):
-            end      = min(start + batch_size, n_books)
-            bidxs    = all_book_idxs[start:end]
-            gctx     = all_genre_ctx[start:end]
-            yidxs    = all_year_idxs[start:end]
-            aidxs    = model.book_author_idx[bidxs]
+            end   = min(start + batch_size, n_books)
+            bidxs = all_book_idxs[start:end]
 
-            genre_embs.append(model.item_genre_tower(gctx))
+            genre_embs.append(model.item_genre_tower(model.book_genre_matrix[bidxs]))
             shelf_embs.append(model.item_shelf_tower(model.book_shelf_matrix[bidxs]))
             book_embs.append(model.item_embedding_tower(model.item_embedding_lookup(bidxs)))
-            author_embs.append(model.author_tower(model.author_embedding_lookup(aidxs)))
-            year_embs.append(model.year_embedding_tower(model.year_embedding_lookup(yidxs)))
+            author_embs.append(model.author_tower(
+                model.author_embedding_lookup(model.book_author_idx[bidxs])))
+            year_embs.append(model.year_embedding_tower(
+                model.year_embedding_lookup(model.book_year_idx[bidxs])))
+            combined_embs.append(model.item_embedding(bidxs))
 
-    genre_all  = torch.cat(genre_embs,  dim=0)
-    shelf_all  = torch.cat(shelf_embs,  dim=0)
-    book_all   = torch.cat(book_embs,   dim=0)
-    author_all = torch.cat(author_embs, dim=0)
-    year_all   = torch.cat(year_embs,   dim=0)
-    concat = torch.cat([genre_all, shelf_all, book_all, author_all, year_all], dim=1)
-    with torch.no_grad():
-        combined = model.item_projection(concat) if model.item_projection is not None else concat
+    genre_all    = torch.cat(genre_embs,    dim=0)
+    shelf_all    = torch.cat(shelf_embs,    dim=0)
+    book_all     = torch.cat(book_embs,     dim=0)
+    author_all   = torch.cat(author_embs,   dim=0)
+    year_all     = torch.cat(year_embs,     dim=0)
+    combined_all = torch.cat(combined_embs, dim=0)
 
     bookId_to_embedding = {}
     for i, bid in enumerate(fs.top_books):
@@ -417,7 +408,7 @@ def build_book_embeddings(model: BookRecommender, fs: FeatureStore) -> dict:
             'BOOK_ID_EMBEDDING':       book_all[i].unsqueeze(0),
             'BOOK_AUTHOR_EMBEDDING':   author_all[i].unsqueeze(0),
             'BOOK_YEAR_EMBEDDING':     year_all[i].unsqueeze(0),
-            'BOOK_EMBEDDING_COMBINED': combined[i].unsqueeze(0),
+            'BOOK_EMBEDDING_COMBINED': combined_all[i].unsqueeze(0),
         }
 
     return bookId_to_embedding
@@ -505,25 +496,16 @@ def _build_user_embedding(model: BookRecommender, fs: FeatureStore, user_type: s
         if g in fs.genre_to_i:
             ctx[fs.genre_to_i[g]] = VALUE_DISLIKED_GENRE_RATING
 
-    # ── Build user towers (mirrors model.forward user side) ───────────────────
+    # ── Build user embedding via model.user_embedding() ──────────────────────
     if history:
-        hist_idx_t = torch.tensor([h[0] for h in history], dtype=torch.long).unsqueeze(0)  # (1, hist)
-        hist_wts_t = torch.tensor([[h[1] for h in history]], dtype=torch.float)             # (1, hist)
-        pad_mask   = torch.ones_like(hist_wts_t).unsqueeze(-1)                              # (1, hist, 1)
-        rat_wts    = hist_wts_t.unsqueeze(-1) * pad_mask                                    # (1, hist, 1)
-        wt_sum     = rat_wts.abs().sum(dim=1).clamp(min=1e-6)                               # (1, 1)
-
-        hist_embs   = model.item_embedding_lookup(hist_idx_t)                               # (1, hist, D)
-        history_emb = (hist_embs * rat_wts).sum(dim=1) / wt_sum                             # (1, D)
+        hist_idx_t = torch.tensor([[h[0] for h in history]], dtype=torch.long)  # (1, hist)
+        hist_wts_t = torch.tensor([[h[1] for h in history]], dtype=torch.float)  # (1, hist)
     else:
-        history_emb = torch.zeros(1, model.item_embedding_lookup.embedding_dim)
+        hist_idx_t = torch.full((1, 1), model.book_pad_idx, dtype=torch.long)
+        hist_wts_t = torch.zeros(1, 1)
 
-    X_inf     = torch.tensor([ctx])
-    genre_emb = model.user_genre_tower(X_inf)
-    ts_emb    = model.timestamp_embedding_tower(model.timestamp_embedding_lookup(ts_inference))
-
-    concat = torch.cat([history_emb, genre_emb, ts_emb], dim=1)
-    return model.user_projection(concat) if model.user_projection is not None else concat
+    X_inf = torch.tensor([ctx])
+    return model.user_embedding(X_inf, hist_idx_t, hist_wts_t, ts_inference)
 
 
 def run_canary_eval(model: BookRecommender, fs: FeatureStore,
@@ -679,11 +661,12 @@ def probe_shelf(model: BookRecommender, shelf_tags: list, book_embeddings: dict,
 def probe_similar(book_embeddings: dict, fs: FeatureStore,
                   all_ids: list, all_norm: torch.Tensor,
                   titles: list, top_n: int = 5,
-                  all_norm_id: torch.Tensor = None) -> None:
+                  all_norm_id: torch.Tensor = None,
+                  all_norm_shelf: torch.Tensor = None) -> None:
     """
     For each query title, find the top-N most similar books by cosine similarity.
-    Shows results for BOOK_EMBEDDING_COMBINED and optionally BOOK_ID_EMBEDDING side by side.
-    Uses pre-normalized all_norm (and all_norm_id) matrices from _setup.
+    Shows results for BOOK_EMBEDDING_COMBINED, BOOK_ID_EMBEDDING, and BOOK_SHELF_EMBEDDING.
+    Uses pre-normalized matrices from _load_model_and_embeddings.
     """
     TRUNC = 30
 
@@ -732,6 +715,10 @@ def probe_similar(book_embeddings: dict, fs: FeatureStore,
         id_rows = [(t, get_top_n(all_norm_id, 'BOOK_ID_EMBEDDING', t)) for t in titles]
         print_table('book ID embedding only', id_rows)
 
+    if all_norm_shelf is not None:
+        shelf_rows = [(t, get_top_n(all_norm_shelf, 'BOOK_SHELF_EMBEDDING', t)) for t in titles]
+        print_table('shelf embedding only', shelf_rows)
+
 
 # ── Setup helpers ─────────────────────────────────────────────────────────────
 
@@ -739,10 +726,11 @@ def _resolve_checkpoint(checkpoint_path: str, checkpoint_dir: str):
     if checkpoint_path is not None:
         return checkpoint_path
     candidates = sorted(
-        glob.glob(os.path.join(checkpoint_dir, 'best_checkpoint_*.pth')) +
-        glob.glob(os.path.join(checkpoint_dir, 'best_proj_softmax_*.pth')) +
-        glob.glob(os.path.join(checkpoint_dir, 'best_softmax_*.pth'))    +
-        glob.glob(os.path.join(checkpoint_dir, 'best_bpr_*.pth'))        +
+        glob.glob(os.path.join(checkpoint_dir, 'best_checkpoint_*.pth'))        +
+        glob.glob(os.path.join(checkpoint_dir, 'best_proj_softmax_ipool_*.pth')) +
+        glob.glob(os.path.join(checkpoint_dir, 'best_proj_softmax_*.pth'))       +
+        glob.glob(os.path.join(checkpoint_dir, 'best_softmax_*.pth'))            +
+        glob.glob(os.path.join(checkpoint_dir, 'best_bpr_*.pth'))                +
         glob.glob(os.path.join(checkpoint_dir, 'best_mse_*.pth')),
         key=os.path.getmtime, reverse=True
     )
@@ -755,7 +743,10 @@ def _resolve_checkpoint(checkpoint_path: str, checkpoint_dir: str):
 def _load_model_and_embeddings(checkpoint_path: str, fs):
     """Build model, load weights, pre-compute book embeddings."""
     basename = os.path.basename(checkpoint_path)
-    if basename.startswith('best_proj_softmax_') or basename.startswith('proj_softmax_'):
+    if 'ipool' in basename:
+        config = get_softmax_config()
+        config['use_item_pool_for_history'] = True
+    elif basename.startswith('best_proj_softmax_') or basename.startswith('proj_softmax_'):
         config = get_softmax_config()
     elif basename.startswith('best_softmax_') or basename.startswith('softmax_'):
         config = get_softmax_config_legacy()
@@ -772,12 +763,14 @@ def _load_model_and_embeddings(checkpoint_path: str, fs):
     book_embeddings = build_book_embeddings(model, fs)
 
     print("Precomputing embedding matrix ...")
-    all_ids     = list(book_embeddings.keys())
-    all_embs    = torch.cat([book_embeddings[bid]['BOOK_EMBEDDING_COMBINED'] for bid in all_ids], dim=0)
-    all_norm    = F.normalize(all_embs, dim=1)
-    all_id_embs = torch.cat([book_embeddings[bid]['BOOK_ID_EMBEDDING'] for bid in all_ids], dim=0)
-    all_norm_id = F.normalize(all_id_embs, dim=1)
-    return model, book_embeddings, all_ids, all_embs, all_norm, all_norm_id
+    all_ids       = list(book_embeddings.keys())
+    all_embs      = torch.cat([book_embeddings[bid]['BOOK_EMBEDDING_COMBINED'] for bid in all_ids], dim=0)
+    all_norm      = F.normalize(all_embs, dim=1)
+    all_id_embs   = torch.cat([book_embeddings[bid]['BOOK_ID_EMBEDDING']       for bid in all_ids], dim=0)
+    all_norm_id   = F.normalize(all_id_embs, dim=1)
+    all_shelf_embs = torch.cat([book_embeddings[bid]['BOOK_SHELF_EMBEDDING']   for bid in all_ids], dim=0)
+    all_norm_shelf = F.normalize(all_shelf_embs, dim=1)
+    return model, book_embeddings, all_ids, all_embs, all_norm, all_norm_id, all_norm_shelf
 
 
 # ── Orchestrators ─────────────────────────────────────────────────────────────
@@ -790,7 +783,7 @@ def run_canary(data_dir: str = 'data', checkpoint_path: str = None,
         return
     print("Loading features ...")
     fs = load_features(data_dir, version)
-    model, book_embeddings, all_ids, all_embs, all_norm, all_norm_id = _load_model_and_embeddings(cp, fs)
+    model, book_embeddings, all_ids, all_embs, all_norm, all_norm_id, all_norm_shelf = _load_model_and_embeddings(cp, fs)
     print("\n── Canary user evaluation ──")
     run_canary_eval(model, fs, book_embeddings, all_ids, all_embs)
 
@@ -816,7 +809,7 @@ def run_probes(data_dir: str = 'data', checkpoint_path: str = None,
         return
     print("Loading book features ...")
     fs = load_book_features(data_dir, version)
-    model, book_embeddings, all_ids, all_embs, all_norm, all_norm_id = _load_model_and_embeddings(cp, fs)
+    model, book_embeddings, all_ids, all_embs, all_norm, all_norm_id, all_norm_shelf = _load_model_and_embeddings(cp, fs)
     print("\n── Embedding probes ──")
     probe_genre(model, 'mystery, thriller, crime', book_embeddings, fs)
     probe_genre(model, 'fantasy, paranormal',      book_embeddings, fs)
@@ -824,4 +817,5 @@ def run_probes(data_dir: str = 'data', checkpoint_path: str = None,
     probe_shelf(model, ['horror', 'scary', 'dark'],          book_embeddings, fs)
     probe_shelf(model, ['science-fiction', 'sci-fi', 'space'], book_embeddings, fs)
     probe_shelf(model, ['epic-fantasy', 'magic', 'world-building'], book_embeddings, fs)
-    probe_similar(book_embeddings, fs, all_ids, all_norm, PROBE_SIMILAR_TITLES, all_norm_id=all_norm_id)
+    probe_similar(book_embeddings, fs, all_ids, all_norm, PROBE_SIMILAR_TITLES,
+                  all_norm_id=all_norm_id, all_norm_shelf=all_norm_shelf)
