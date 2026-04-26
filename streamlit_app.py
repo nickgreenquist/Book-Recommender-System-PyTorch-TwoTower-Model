@@ -60,9 +60,8 @@ def load_artifacts():
         user_context_size=fs['user_context_size'],
         book_shelf_matrix=fs['book_shelf_matrix'],
         book_author_idx=fs['book_author_idx'],
-        book_genre_matrix=fs.get('book_genre_matrix'),
-        book_year_idx=fs.get('book_year_idx'),
-        use_item_pool_for_history=cfg.get('use_item_pool_for_history', False),
+        book_genre_matrix=fs['book_genre_matrix'],
+        book_year_idx=fs['book_year_idx'],
         item_id_embedding_size=cfg['item_id_embedding_size'],
         author_embedding_size=cfg['author_embedding_size'],
         shelf_embedding_size=cfg['shelf_embedding_size'],
@@ -70,8 +69,8 @@ def load_artifacts():
         timestamp_embedding_size=cfg['timestamp_embedding_size'],
         item_genre_embedding_size=cfg['item_genre_embedding_size'],
         item_year_embedding_size=cfg['item_year_embedding_size'],
-        proj_hidden=cfg.get('proj_hidden', 256),
-        output_dim=cfg.get('output_dim', 128),
+        proj_hidden=cfg['proj_hidden'],
+        output_dim=cfg['output_dim'],
     )
     # strict=False: model.pth excludes buffers (book_shelf_matrix, book_author_idx)
     # which are already set via the constructor above.

@@ -2,21 +2,13 @@
 Two-Tower BookRecommender model.
 
 Registered buffers:
-  book_shelf_matrix  — (n_books+1, n_shelves) shelf scores; last row = padding  [persistent]
-  book_author_idx    — (n_books+1,) primary author vocab index; last = padding   [persistent]
-  book_genre_matrix  — (n_books+1, n_genres) genre context; last row = zeros     [non-persistent]
-  book_year_idx      — (n_books+1,) year vocab index; last entry = 0             [non-persistent]
+  book_shelf_matrix  — (n_books+1, n_shelves) shelf TF-IDF scores; last row = zeros  [persistent]
+  book_author_idx    — (n_books+1,) primary author vocab index; last = padding idx    [persistent]
+  book_genre_matrix  — (n_books+1, n_genres) genre context; last row = zeros          [non-persistent]
+  book_year_idx      — (n_books+1,) year vocab index; last entry = 0                  [non-persistent]
 
-User tower modes:
-  use_item_pool_for_history=False (prod):
-    concat: id_pool(32) + genre(32) + ts(8) = 72 → proj MLP → output_dim
-  use_item_pool_for_history=True (experiment):
-    concat: item_pool(output_dim) + genre(32) + ts(8) = 168 → proj MLP → output_dim
-
-Item tower: genre + shelf + book_id + author + year → projection MLP
-  concat: 10 + 40 + 32 + 10 + 8 = 100 → proj MLP → output_dim
-
-proj_hidden=None → no projection (legacy flat model).
+User tower: item_pool(128) + genre(32) + ts(8) = 168 → projection MLP → output_dim
+Item tower: genre(10) + shelf(40) + book_id(32) + author(10) + year(8) = 100 → projection MLP → output_dim
 """
 import torch
 import torch.nn as nn
@@ -33,9 +25,8 @@ class BookRecommender(nn.Module):
                  user_context_size,
                  book_shelf_matrix,
                  book_author_idx,
-                 book_genre_matrix=None,
-                 book_year_idx=None,
-                 use_item_pool_for_history=False,
+                 book_genre_matrix,
+                 book_year_idx,
                  item_id_embedding_size=32,
                  author_embedding_size=10,
                  item_year_embedding_size=8,
@@ -48,10 +39,9 @@ class BookRecommender(nn.Module):
                  ):
         super().__init__()
 
-        self.book_pad_idx              = n_books
-        self.author_pad_idx            = n_authors
-        self.output_dim                = output_dim
-        self.use_item_pool_for_history = use_item_pool_for_history
+        self.book_pad_idx   = n_books
+        self.author_pad_idx = n_authors
+        self.output_dim     = output_dim
 
         # Persistent buffers — saved in state_dict (excluded at export via key filter)
         self.register_buffer('book_shelf_matrix', book_shelf_matrix)
@@ -115,43 +105,32 @@ class BookRecommender(nn.Module):
         )
 
         # ── Projection MLPs (learn cross-feature interactions) ────────────────
-        # proj_hidden=None → no projection; towers output raw concat (legacy flat model).
-        if proj_hidden is not None:
-            if use_item_pool_for_history:
-                # item pool produces output_dim-dim vector in place of the id pool
-                user_concat_dim = (output_dim + user_genre_embedding_size
-                                   + timestamp_embedding_size)
-            else:
-                user_concat_dim = (item_id_embedding_size + user_genre_embedding_size
-                                   + timestamp_embedding_size)
-            item_concat_dim = (item_genre_embedding_size + shelf_embedding_size
-                               + item_id_embedding_size + author_embedding_size
-                               + item_year_embedding_size)
+        # User pools the full output_dim-dim item embedding over read history.
+        user_concat_dim = output_dim + user_genre_embedding_size + timestamp_embedding_size
+        item_concat_dim = (item_genre_embedding_size + shelf_embedding_size
+                           + item_id_embedding_size + author_embedding_size
+                           + item_year_embedding_size)
 
-            # No activation on the final linear — feeds directly into dot product.
-            self.user_projection = nn.Sequential(
-                nn.Linear(user_concat_dim, proj_hidden),
-                nn.ReLU(),
-                nn.Linear(proj_hidden, output_dim),
-            )
-            self.item_projection = nn.Sequential(
-                nn.Linear(item_concat_dim, proj_hidden),
-                nn.ReLU(),
-                nn.Linear(proj_hidden, output_dim),
-            )
-        else:
-            self.user_projection = None
-            self.item_projection = None
+        # No activation on the final linear — feeds directly into dot product.
+        self.user_projection = nn.Sequential(
+            nn.Linear(user_concat_dim, proj_hidden),
+            nn.ReLU(),
+            nn.Linear(proj_hidden, output_dim),
+        )
+        self.item_projection = nn.Sequential(
+            nn.Linear(item_concat_dim, proj_hidden),
+            nn.ReLU(),
+            nn.Linear(proj_hidden, output_dim),
+        )
 
         self.apply(self._init_weights)
         # Projection layers need standard gain — gain=0.1 compounds across multiple
         # layers and causes vanishing gradients when sub-tower outputs are also small.
-        if self.user_projection is not None:
-            for proj in [self.user_projection, self.item_projection]:
-                for m in proj.modules():
-                    if isinstance(m, nn.Linear):
-                        nn.init.xavier_uniform_(m.weight)
-                        nn.init.constant_(m.bias, 0)
+        for proj in [self.user_projection, self.item_projection]:
+            for m in proj.modules():
+                if isinstance(m, nn.Linear):
+                    nn.init.xavier_uniform_(m.weight)
+                    nn.init.constant_(m.bias, 0)
 
     def _init_weights(self, module):
         if isinstance(module, nn.Linear):
@@ -174,17 +153,12 @@ class BookRecommender(nn.Module):
         rating_weights = X_history_ratings.unsqueeze(-1) * pad_mask
         weight_sum     = rating_weights.abs().sum(dim=1).clamp(min=1e-6)
 
-        genre_emb = self.user_genre_tower(X_genre)
-        ts_emb    = self.timestamp_embedding_tower(self.timestamp_embedding_lookup(timestamps))
-
-        if self.use_item_pool_for_history:
-            history_emb = self._item_pool(X_history, rating_weights, weight_sum)
-        else:
-            history_embs = self.item_embedding_lookup(X_history)
-            history_emb  = (history_embs * rating_weights).sum(dim=1) / weight_sum
+        genre_emb   = self.user_genre_tower(X_genre)
+        ts_emb      = self.timestamp_embedding_tower(self.timestamp_embedding_lookup(timestamps))
+        history_emb = self._item_pool(X_history, rating_weights, weight_sum)
 
         concat = torch.cat([history_emb, genre_emb, ts_emb], dim=1)
-        return self.user_projection(concat) if self.user_projection is not None else concat
+        return self.user_projection(concat)
 
     def item_embedding(self, target_book_idx):
         """Item tower. Looks up all features from registered buffers. Returns (batch, output_dim)."""
@@ -197,10 +171,10 @@ class BookRecommender(nn.Module):
                               self.year_embedding_lookup(self.book_year_idx[target_book_idx]))
         concat = torch.cat([item_genre_emb, item_shelf_emb, item_emb,
                             item_author_emb, year_emb], dim=1)
-        return self.item_projection(concat) if self.item_projection is not None else concat
+        return self.item_projection(concat)
 
     def forward(self, X_genre, X_history, X_history_ratings, timestamps, target_book_idx):
-        """Dot-product score for a (user, item) pair. Used by BPR and MSE training."""
+        """Dot-product score for a (user, item) pair."""
         user_emb = self.user_embedding(X_genre, X_history, X_history_ratings, timestamps)
         item_emb = self.item_embedding(target_book_idx)
         return torch.einsum('ij,ij->i', user_emb, item_emb)

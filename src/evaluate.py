@@ -14,8 +14,7 @@ import torch
 import torch.nn.functional as F
 from src.dataset import FeatureStore
 from src.model import BookRecommender
-from src.train import (build_model, get_config, get_softmax_config,
-                        get_softmax_config_legacy, print_model_summary)
+from src.train import build_model, get_softmax_config, print_model_summary
 
 
 # ── Canary user definitions ───────────────────────────────────────────────────
@@ -368,6 +367,7 @@ USER_TYPE_TO_SHELF_TAGS = {
     'Sci-Fi Lover':    ['science-fiction', 'sci-fi'],
     'NonFiction Lover':  ['non-fiction'],
     'Economics Lover': ['economics'],
+    'Philosophy & Existentialist Thinker': ['philosophy', 'existentialism'],
     'Graphic Novel/Comic Lover': ['graphic-novels', 'comics', 'graphic-novel'],
     'Manga Lover':     ['shonen'],
     'Religion Book Reader': ['religion'],
@@ -748,12 +748,8 @@ def _resolve_checkpoint(checkpoint_path: str, checkpoint_dir: str):
     if checkpoint_path is not None:
         return checkpoint_path
     candidates = sorted(
-        glob.glob(os.path.join(checkpoint_dir, 'best_checkpoint_*.pth'))        +
         glob.glob(os.path.join(checkpoint_dir, 'best_proj_softmax_ipool_*.pth')) +
-        glob.glob(os.path.join(checkpoint_dir, 'best_proj_softmax_*.pth'))       +
-        glob.glob(os.path.join(checkpoint_dir, 'best_softmax_*.pth'))            +
-        glob.glob(os.path.join(checkpoint_dir, 'best_bpr_*.pth'))                +
-        glob.glob(os.path.join(checkpoint_dir, 'best_mse_*.pth')),
+        glob.glob(os.path.join(checkpoint_dir, 'proj_softmax_ipool_*.pth')),
         key=os.path.getmtime, reverse=True
     )
     if not candidates:
@@ -764,17 +760,7 @@ def _resolve_checkpoint(checkpoint_path: str, checkpoint_dir: str):
 
 def _load_model_and_embeddings(checkpoint_path: str, fs):
     """Build model, load weights, pre-compute book embeddings."""
-    basename = os.path.basename(checkpoint_path)
-    if 'ipool' in basename:
-        config = get_softmax_config()
-        config['use_item_pool_for_history'] = True
-    elif basename.startswith('best_proj_softmax_') or basename.startswith('proj_softmax_'):
-        config = get_softmax_config()
-        config['use_item_pool_for_history'] = False
-    elif basename.startswith('best_softmax_') or basename.startswith('softmax_'):
-        config = get_softmax_config_legacy()
-    else:
-        config = get_config()
+    config = get_softmax_config()
     print(f"Loading checkpoint: {checkpoint_path}")
     state_dict = torch.load(checkpoint_path, weights_only=True)
     model = build_model(config, fs)

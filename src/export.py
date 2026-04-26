@@ -23,7 +23,7 @@ import torch
 
 from src.dataset import load_features
 from src.evaluate import build_book_embeddings
-from src.train import build_model, get_config, get_softmax_config, get_softmax_config_legacy
+from src.train import build_model, get_softmax_config
 
 SERVING_DIR = 'serving'
 
@@ -34,9 +34,7 @@ def run_export(data_dir: str = 'data', checkpoint_path: str = None,
     if checkpoint_path is None:
         candidates = sorted(
             glob.glob(os.path.join('saved_models', 'best_proj_softmax_ipool_*.pth')) +
-            glob.glob(os.path.join('saved_models', 'best_proj_softmax_*.pth'))       +
-            glob.glob(os.path.join('saved_models', 'best_softmax_*.pth'))             +
-            glob.glob(os.path.join('saved_models', 'best_checkpoint_*.pth')),
+            glob.glob(os.path.join('saved_models', 'proj_softmax_ipool_*.pth')),
             key=os.path.getmtime, reverse=True,
         )
         if not candidates:
@@ -45,17 +43,7 @@ def run_export(data_dir: str = 'data', checkpoint_path: str = None,
         checkpoint_path = candidates[0]
 
     print(f"Checkpoint: {checkpoint_path}")
-    basename = os.path.basename(checkpoint_path)
-    if 'ipool' in basename:
-        config = get_softmax_config()
-        config['use_item_pool_for_history'] = True
-    elif basename.startswith(('best_proj_softmax_', 'proj_softmax_')):
-        config = get_softmax_config()
-        config['use_item_pool_for_history'] = False
-    elif basename.startswith(('best_softmax_', 'softmax_')):
-        config = get_softmax_config_legacy()
-    else:
-        config = get_config()
+    config = get_softmax_config()
 
     print("Loading features ...")
     fs = load_features(data_dir, version)

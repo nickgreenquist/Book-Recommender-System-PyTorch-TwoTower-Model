@@ -1,10 +1,9 @@
 """
-Stage 3 — Dataset Loading
-Reads features_*.parquet into a FeatureStore, builds PyTorch tensors.
-No files are written here — pure in-memory.
+Stage 3 — Dataset building for in-batch negatives softmax training.
+Reads features_*.parquet into a FeatureStore, builds rollback training examples.
 
-Usage (from train.py or main.py):
-    from src.dataset import load_features, make_splits
+Usage:
+    from src.dataset import load_features, make_softmax_splits
 """
 import os
 import random
@@ -266,116 +265,11 @@ def pad_history_ratings_batch(history_ratings: list) -> torch.Tensor:
     return padded
 
 
-# ── Dataset builder ───────────────────────────────────────────────────────────
-
-BPR_POS_THRESHOLD =  0.5   # debiased rating above this → positive
-BPR_NEG_THRESHOLD = -0.5   # debiased rating below this → negative
-
-
-def build_dataset(users: list, fs: FeatureStore) -> tuple:
-    """
-    Build training/validation tensors for a list of user IDs.
-    Returns a 7-tuple:
-      [0] X_genre, [1] X_history (list), [2] X_history_ratings (list),
-      [3] timestamp, [4] Y, [5] target_book_idx,
-      [6] bpr_pairs — LongTensor (N_pairs, 2): same-user (pos_row, neg_row) index pairs
-    target_genre/year/author_idx are NOT stored — looked up from model buffers at forward time.
-    bpr_pairs uses BPR_POS_THRESHOLD / BPR_NEG_THRESHOLD on debiased Y values.
-    """
-    X_genre           = []
-    X_history         = []
-    X_history_ratings = []
-    timestamp         = []
-    Y                 = []
-    target_book_idx   = []
-    user_rows         = {}   # user → list of row indices (for BPR pairing)
-
-    from tqdm import tqdm
-    for user in tqdm(users, desc="Collecting samples"):
-        user_row_indices = []
-        for book_id, rating in fs.user_to_book_to_rating_LABEL[user].items():
-            if book_id not in fs.bookId_to_idx:
-                continue
-            row_idx = len(Y)
-            X_genre.append(fs.user_to_genre_context[user])
-            X_history.append(fs.user_to_read_history[user])
-            X_history_ratings.append(fs.user_to_read_history_ratings[user])
-            timestamp.append(fs.user_to_book_to_timestamp_LABEL[user][book_id])
-            Y.append(float(rating) - fs.user_to_avg_rating[user])
-            target_book_idx.append(fs.bookId_to_idx[book_id])
-            user_row_indices.append(row_idx)
-        if user_row_indices:
-            user_rows[user] = user_row_indices
-
-    n = len(Y)
-    print(f"  {n:,} samples — building tensors ...")
-
-    print("  X_genre, Y, target_book_idx, timestamp ...")
-    X_genre_t         = torch.from_numpy(np.array(X_genre,        dtype=np.float32))
-    Y_t               = torch.from_numpy(np.array(Y,              dtype=np.float32))
-    target_book_idx_t = torch.from_numpy(np.array(target_book_idx, dtype=np.int64))
-    timestamp_t       = torch.bucketize(
-        torch.from_numpy(np.array(timestamp, dtype=np.float64)).float(),
-        fs.timestamp_bins.float(), right=False)
-
-    print("  BPR pairs ...")
-    Y_arr = np.array(Y, dtype=np.float32)
-    bpr_pairs = []
-    for rows in user_rows.values():
-        pos = [r for r in rows if Y_arr[r] >  BPR_POS_THRESHOLD]
-        neg = [r for r in rows if Y_arr[r] < BPR_NEG_THRESHOLD]
-        for p in pos:
-            for q in neg:
-                bpr_pairs.append((p, q))
-    bpr_pairs_t = torch.tensor(bpr_pairs, dtype=torch.long) if bpr_pairs else torch.zeros((0, 2), dtype=torch.long)
-    print(f"  {len(bpr_pairs):,} BPR pairs from {sum(1 for r in user_rows.values() if any(Y_arr[i] > BPR_POS_THRESHOLD for i in r) and any(Y_arr[i] < BPR_NEG_THRESHOLD for i in r)):,} users with both pos and neg labels")
-
-    return (X_genre_t, X_history, X_history_ratings, timestamp_t, Y_t,
-            target_book_idx_t, bpr_pairs_t)
-
-
-# ── Disk cache helpers ────────────────────────────────────────────────────────
-
-def save_splits(train_data: tuple, val_data: tuple,
-                data_dir: str = 'data', version: str = 'v1') -> None:
-    torch.save(train_data, os.path.join(data_dir, f'dataset_train_{version}.pt'))
-    torch.save(val_data,   os.path.join(data_dir, f'dataset_val_{version}.pt'))
-    print(f"Saved dataset_train_{version}.pt and dataset_val_{version}.pt → {data_dir}/")
-
-
-def load_splits(data_dir: str = 'data', version: str = 'v1') -> tuple:
-    train_path = os.path.join(data_dir, f'dataset_train_{version}.pt')
-    val_path   = os.path.join(data_dir, f'dataset_val_{version}.pt')
-    print(f"Loading {train_path} ...")
-    train_data = torch.load(train_path, weights_only=False)
-    print(f"Loading {val_path} ...")
-    val_data   = torch.load(val_path, weights_only=False)
-    # Old files were 10-tuples (indices 6-8 = genre/year/author, 9 = bpr_pairs).
-    # New files are 7-tuples (indices 0-5 same, 6 = bpr_pairs).
-    if len(train_data) == 10:
-        train_data = train_data[:6] + (train_data[9],)
-        val_data   = val_data[:6]   + (val_data[9],)
-    return train_data, val_data
-
-
-# ── Softmax dataset (rollback, implicit feedback) ─────────────────────────────
-#
-# Each user contributes multiple training examples via "rollback":
-# for a user who read books [A, B, C, D, E] in order, we generate examples like:
-#   context=[A],       target=B
-#   context=[A,B,C],   target=D
-#   context=[A,B,C,D], target=E
-# Each example uses only books read *before* the target — no future leakage.
-# This mirrors serving time, where we predict the next book from the user's history so far.
-# MAX_SOFTMAX_EXAMPLES_PER_USER controls how many of these rollback examples
-# we randomly sample per user (upfront, before scanning reads).
-#
-# Why rollback for BOTH train and val (not "last read holdout" for val):
-# Rollback produces examples with varying context lengths (short to long).
-# If val used only the last read per user (full history as context), val examples
-# would always have long contexts while train has short+long — a distribution mismatch
-# that makes val loss unreliable. Using rollback for both keeps the context length
-# distribution consistent across train and val.
+# ── Softmax dataset (rollback) ────────────────────────────────────────────────
+# Each user contributes multiple training examples via "rollback": for a user who
+# read [A, B, C, D, E] in order, context=[A] predicts B, context=[A,B,C] predicts D, etc.
+# Both train and val use rollback (not last-read holdout) to keep context length
+# distributions consistent. MAX_SOFTMAX_EXAMPLES_PER_USER caps examples per user.
 
 MAX_SOFTMAX_EXAMPLES_PER_USER = 10   # rollback examples sampled per user
 
@@ -529,11 +423,9 @@ def make_softmax_splits(fs: FeatureStore, data_dir: str = 'data',
                         pct_train: float = 0.9, seed: int = 42,
                         max_users: int = None) -> tuple:
     """
-    Load base_interactions_raw.parquet, split users 90/10, build softmax datasets.
-    Returns (train_data, val_data) each an 8-tuple from build_softmax_dataset().
-
-    max_users: if set, subsample to this many total users (for fast debug runs).
-               e.g. max_users=10_000 builds a small dataset quickly.
+    Load base_interactions_raw.parquet, split users 90/10, build rollback datasets.
+    max_users: if set, subsample (for fast debug runs, e.g. max_users=10_000).
+    Returns (train_data, val_data).
     """
     import pandas as pd
     raw_path = os.path.join(data_dir, 'base_interactions_raw.parquet')
@@ -579,36 +471,4 @@ def load_softmax_splits(data_dir: str = 'data', version: str = 'v1') -> tuple:
     train_data = torch.load(train_path, weights_only=False)
     print(f"Loading {val_path} ...")
     val_data   = torch.load(val_path, weights_only=False)
-    # Old files were 8-tuples; new files are 5-tuples. Slice for backward compat.
-    return train_data[:5], val_data[:5]
-
-
-# ── Train / val split ─────────────────────────────────────────────────────────
-
-def make_splits(fs: FeatureStore, pct_train: float = 0.9, seed: int = 42) -> tuple:
-    """
-    Split users into train/val, build tensors for each.
-    Returns (train_data, val_data) where each is the 10-tuple from build_dataset().
-    """
-    final_users = [
-        u for u in fs.user_ids
-        if 2 <= len(fs.user_to_book_to_rating_LABEL.get(u, {})) < 500
-    ]
-    print(f"Final users for training: {len(final_users):,}  "
-          f"(skipped {len(fs.user_ids) - len(final_users):,})")
-
-    rng = random.Random(seed)
-    rng.shuffle(final_users)
-    split       = int(len(final_users) * pct_train)
-    train_users = final_users[:split]
-    val_users   = final_users[split:]
-
-    print(f"Building train dataset ({len(train_users):,} users) ...")
-    train_data = build_dataset(train_users, fs)
-    print(f"  X_genre_train shape: {train_data[0].shape}")
-
-    print(f"Building val dataset ({len(val_users):,} users) ...")
-    val_data = build_dataset(val_users, fs)
-    print(f"  X_genre_val shape:   {val_data[0].shape}")
-
     return train_data, val_data
