@@ -37,7 +37,8 @@ USER_TYPE_TO_FAVORITE_GENRES = {
     'Sci-Fi Lover':       [],  # no sci-fi genre in vocab — relies on shelf tags + books
     'NonFiction Lover':   ['non-fiction'],
     'Economics Lover':  [],
-    'Manga Lover':      [],  # no manga genre in vocab — relies on shelf tags + books
+    'Graphic Novel/Comic Lover': ['comics, graphic'],
+    'Manga Lover':      [],
     'Religion Book Reader': [],
     'Poetry Lover':     ['poetry'],
     "Children's Book Lover": ['children'],
@@ -55,6 +56,7 @@ USER_TYPE_TO_WORST_GENRES = {
     'Sci-Fi Lover':      [],
     'NonFiction Lover':  [],
     'Economics Lover': [],
+    'Graphic Novel/Comic Lover': [],
     'Manga Lover':     [],
     'Religion Book Reader': [],
     'Poetry Lover':    [],
@@ -184,6 +186,11 @@ USER_TYPE_TO_FAVORITE_BOOKS = {
         'The Intelligent Investor',
         'The Wealth of Nations',
         'Capital in the Twenty-First Century',
+    ],
+    'Graphic Novel/Comic Lover': [
+        'Watchmen',
+        'Saga, Vol. 1 (Saga, #1)',
+        "Maus I: A Survivor's Tale: My Father Bleeds History (Maus, #1)",
     ],
     'Manga Lover': [
         'Fullmetal Alchemist, Vol. 1 (Fullmetal Alchemist, #1)',
@@ -361,6 +368,7 @@ USER_TYPE_TO_SHELF_TAGS = {
     'Sci-Fi Lover':    ['science-fiction', 'sci-fi'],
     'NonFiction Lover':  ['non-fiction'],
     'Economics Lover': ['economics'],
+    'Graphic Novel/Comic Lover': ['graphic-novels', 'comics', 'graphic-novel'],
     'Manga Lover':     ['shonen'],
     'Religion Book Reader': ['religion'],
     'Poetry Lover':    ['poetry'],
