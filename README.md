@@ -15,34 +15,35 @@ Trained with in-batch negatives softmax loss, following the YouTube DNN retrieva
 Offline evaluation on 5,000 held-out val users (leave-label-out protocol, corpus of ~11k books).
 Random baseline Hit Rate@10 ≈ 0.87% (avg ~10 label books per user).
 
-| Metric | MSE | BPR | Softmax | **Softmax + Projection** |
-|---|---|---|---|---|
-| Hit Rate@10 | 4.7% | 3.5% | 10.7% | **13.0%** |
-| Hit Rate@50 | 17.6% | 14.4% | 28.9% | **33.0%** |
-| Recall@10 | 0.0069 | 0.0041 | 0.0164 | **0.0241** |
-| NDCG@10 | 0.0073 | 0.0042 | 0.0189 | **0.0255** |
-| MRR | 0.024 | 0.016 | 0.053 | **0.064** |
+| Metric | MSE | BPR | Softmax | Softmax + Projection | **+ Item Tower Pool** |
+|---|---|---|---|---|---|
+| Hit Rate@10 | 4.7% | 3.5% | 10.7% | 13.0% | **14.0%** |
+| Hit Rate@50 | 17.6% | 14.4% | 28.9% | 33.0% | **36.3%** |
+| Recall@10 | 0.0069 | 0.0041 | 0.0164 | 0.0241 | **0.0258** |
+| NDCG@10 | 0.0073 | 0.0042 | 0.0189 | 0.0255 | **0.0274** |
+| MRR | 0.024 | 0.016 | 0.053 | 0.064 | **0.067** |
 
-Switching from MSE to softmax improved Hit Rate@10 by **127%**. Adding projection MLPs to both towers improved it a further **21%** (10.7% → 13.0%).
+Switching from MSE to softmax improved Hit Rate@10 by **127%**. Adding projection MLPs improved it a further **21%** (10.7% → 13.0%). Replacing the 32-dim id pool in the user tower with a rating-weighted avg pool over the full 128-dim item embeddings added another **8%** (13.0% → 14.0%).
 
 ## Key design choices
 
-- **No user ID embedding** — users are represented entirely by taste signals: rating-weighted avg pooling of book embeddings, genre affinity, and read timestamp. Any user can get recommendations from just a few books they liked, with no retraining required.
+- **No user ID embedding** — users are represented entirely by taste signals: rating-weighted avg pooling of item embeddings, genre affinity, and read timestamp. Any user can get recommendations from just a few books they liked, with no retraining required.
+- **Item tower pooling** — the user tower pools the full projected item embedding (genre + shelf + ID + author + year → 128-dim) over read history, capturing richer cross-feature signals than pooling raw IDs alone.
 - **In-batch negatives softmax** — trained with cross-entropy over in-batch negatives (batch size 512), following the YouTube DNN approach (Covington et al., 2016).
 
 ## Model architecture
 
 ```
 User Tower:
-  rating_weighted_avg_pool(item_embeddings[read_history])  → 32-dim
-  user_genre_tower([avg_rating_per_genre | read_frac])     → 32-dim
-  timestamp_embedding_tower(read_month)                    → 8-dim
-  concat (72-dim) → projection MLP (256) → 128-dim user embedding
+  rating_weighted_avg_pool(full_item_embeddings[read_history])  → 128-dim  ← full 128-dim item tower output
+  user_genre_tower([avg_rating_per_genre | read_frac])          → 32-dim
+  timestamp_embedding_tower(read_month)                         → 8-dim
+  concat (168-dim) → projection MLP (256) → 128-dim user embedding
 
 Item Tower:
   item_genre_tower(genre_weighted)      → 10-dim
-  item_shelf_tower(tfidf_shelf_scores)  → 40-dim  ← richest signal: 3032-dim TF-IDF
-  item_embedding_tower(book_id)         → 32-dim  ← shared with user history pool
+  item_shelf_tower(tfidf_shelf_scores)  → 40-dim  ← richest signal: 3032-dim TF-IDF, 2-layer MLP
+  item_embedding_tower(book_id)         → 32-dim  ← shared lookup table
   author_tower(primary_author_idx)      → 10-dim
   year_embedding_tower(pub_year)        → 8-dim
   concat (100-dim) → projection MLP (256) → 128-dim item embedding

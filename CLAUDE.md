@@ -103,35 +103,40 @@ Two separate steps — run `preprocess books` first, inspect the corpus size, th
 
 Two-tower design with dot product prediction. Extends the movie model with an **author tower**.
 
+Current production architecture uses `use_item_pool_for_history=True` (item tower pooling, see below).
+
 ```
-User Tower (intentionally simple — no shelf/author pooling):
-  rating_weighted_avg_pool(item_embeddings[read_history])  → history_emb  (item_id_embedding_size)
-  user_genre_tower([avg_rating_per_genre | read_frac])     → genre_emb    (user_genre_embedding_size)
-  timestamp_embedding_tower(read_month)                    → ts_emb       (timestamp_embedding_size)
-  concat → user_combined
+User Tower (item tower pooling — use_item_pool_for_history=True):
+  rating_weighted_avg_pool(full_item_embeddings[read_history])  → 128-dim  ← full item tower output
+  user_genre_tower([avg_rating_per_genre | read_frac])          → 32-dim
+  timestamp_embedding_tower(read_month)                         → 8-dim
+  concat (168-dim) → projection MLP (256) → 128-dim user embedding
 
 Item Tower (all content signals):
-  item_genre_tower(genre_weighted)     → item_genre_emb    (item_genre_embedding_size)
-  item_shelf_tower(tfidf_shelf_scores) → item_shelf_emb    (shelf_embedding_size)
-  item_embedding_tower(book_id)        → item_emb          (item_id_embedding_size)   [shared with user history pool]
-  author_tower(primary_author_idx)     → item_author_emb   (author_embedding_size)
-  year_embedding_tower(pub_year)       → year_emb          (item_year_embedding_size)
-  concat → item_combined
+  item_genre_tower(genre_weighted)     → 10-dim
+  item_shelf_tower(tfidf_shelf_scores) → 40-dim   ← richest signal: 3032-dim TF-IDF, 2-layer MLP
+  item_embedding_tower(book_id)        → 32-dim   ← shared lookup table
+  author_tower(primary_author_idx)     → 10-dim
+  year_embedding_tower(pub_year)       → 8-dim
+  concat (100-dim) → projection MLP (256) → 128-dim item embedding
 
-Prediction: dot_product(user_combined, item_combined)
+Prediction: dot_product(user_embedding, item_embedding)
 ```
 
-`len(user_combined) == len(item_combined)` must hold. Model raises `ValueError` at construction if violated.
+**Legacy user tower** (`use_item_pool_for_history=False`): pools the 32-dim raw book ID embedding instead of the full 128-dim projected item embedding → user concat = 72-dim (32+32+8) → projection MLP (256) → 128-dim. Produces identical item tower; only the user history representation differs.
+
+Both towers end with a 2-layer projection MLP (`concat → Linear(256) → ReLU → Linear(128)`) that learns cross-feature interactions (e.g. genre × history). Both project to `output_dim=128` — the dot product dimension.
 
 ### Shared towers
 
-- `item_embedding_tower` — shared between item side and user history avg pool
+- `item_embedding_tower` — shared between item side and user history pool. With `use_item_pool_for_history=True`, the user tower pools the full projected item embedding (passes through all item sub-towers + projection MLP), not just this lookup table.
 
 ### Tower depths
 
-- `item_shelf_tower`: 2-layer MLP (3032 → 128 → 25) — deep because input is sparse (3% density)
-- `user_genre_tower`: 2-layer MLP (2*n_genres → 64 → 50) — deep because combines two signals per genre
+- `item_shelf_tower`: 2-layer MLP (3032 → 128 → 40) — deep because input is sparse (3% density)
+- `user_genre_tower`: 2-layer MLP (2*n_genres → 64 → 32) — deep because combines two signals per genre
 - All other towers: single Linear + Tanh — input dims are small enough that depth doesn't help
+- Both user and item towers each end with a projection MLP: Linear(256) → ReLU → Linear(128)
 
 ### Author tower details
 
@@ -144,17 +149,20 @@ Prediction: dot_product(user_combined, item_combined)
 ### Current embedding sizes
 
 ```python
-item_id_embedding_size    = 40   # shared: user history pool + item tower
-user_genre_embedding_size = 50
-timestamp_embedding_size  = 10
+item_id_embedding_size    = 32   # shared: item tower lookup + user history pool (id-pool mode)
+user_genre_embedding_size = 32
+timestamp_embedding_size  = 8
 item_genre_embedding_size = 10
-shelf_embedding_size      = 25
-author_embedding_size     = 15
-item_year_embedding_size  = 10
+shelf_embedding_size      = 40   # richest signal: 3032-dim TF-IDF → 2-layer MLP
+author_embedding_size     = 10
+item_year_embedding_size  = 8
 
-# user: 40 + 50 + 10 = 100
-# item: 10 + 25 + 40 + 15 + 10 = 100 ✓
+# user (use_item_pool_for_history=True):  128 + 32 + 8  = 168 → 256 → 128
+# user (use_item_pool_for_history=False):  32 + 32 + 8  =  72 → 256 → 128
+# item:  10 + 40 + 32 + 10 + 8  = 100 → 256 → 128
 ```
+
+The projection MLP absorbs the requirement that user/item concat sizes match — only `output_dim=128` needs to match for the dot product.
 
 ## Training Details
 
@@ -199,47 +207,23 @@ Canary users are synthetic — no real read timestamps. All receive `ts_max_bin`
 | `preprocess.py` | Rewritten — two-step streaming pipeline, Goodreads schema |
 | `features.py` | Adapted — same logic, book column names, author feature added |
 | `dataset.py` | Adapted — same logic, `top_books` / `bookId_to_title` field names |
-| `model.py` | Extended — author tower added to both item side and user side |
-| `train.py` | Identical |
-| `evaluate.py` | Adapted — canary dicts use book titles and shelf tags |
-| `export.py` | Identical |
+| `model.py` | Extended — author tower on item side; `use_item_pool_for_history` flag; non-persistent buffers for `book_genre_matrix`, `book_year_idx` |
+| `train.py` | Adapted — softmax config includes `use_item_pool_for_history`; checkpoint naming encodes architecture |
+| `evaluate.py` | Adapted — canary dicts use book titles and shelf tags; shelf embedding probe table added |
+| `export.py` | Adapted — resolves all architecture variants from checkpoint basename; stores non-persistent buffers in `feature_store.pt` |
 
-## Immediate Next Step
+## Current Production Model
 
-**Run canary + export proj_softmax model** — `python main.py canary saved_models/best_proj_softmax_20260424_082746.pth`, then `python main.py export saved_models/best_proj_softmax_20260424_082746.pth`
+**Checkpoint:** `saved_models/best_proj_softmax_ipool_20260426_093432.pth`
 
-Projection MLP model trained and eval validated (+21% Hit Rate@10 over flat softmax). Run canary to verify recommendation quality, then export to update serving artifacts for the Streamlit app.
+Architecture: projection MLP + item tower pooling (`use_item_pool_for_history=True`). Serving artifacts are in `serving/` and deployed to the Streamlit app.
 
-Three changes to make together (they interact):
+**Architecture history (all ✅ implemented and validated):**
 
-**1. Projection MLP after each tower's concat**
-Each tower ends with a 2-layer MLP instead of passing the raw concat directly to the dot product:
-```
-concat → Linear(256) → ReLU → Linear(128) → dot product
-```
-This lets the model learn cross-feature interactions (e.g. genre × history) that a plain concat + dot product cannot express. Both towers project to the same `output_dim=128`. The old assert that `user_concat_dim == item_concat_dim` must match can be removed — only `output_dim` needs to match.
+1. **Projection MLP** — both towers end with `concat → Linear(256) → ReLU → Linear(128)`. Learns cross-feature interactions (genre × history) that plain concat + dot product cannot express. Hit Rate@10: 10.7% → 13.0% (+21%).
+   - Initialization fix (critical): sub-tower linear layers `gain=0.01 → 0.1`, projection layers initialized separately to `gain=1.0`. Without this, dot products collapse to zero at step 0 and never recover.
 
-**2. Smaller sub-embedding sizes**
-Sub-embedding dims were previously inflated to make the two concat sizes match. With the projection MLP absorbing that constraint, each can be sized on its own merits:
-
-| Signal | Old | New |
-|---|---|---|
-| item_id (shared) | 40 | 32 |
-| user_genre | 50 (padded to match) | 32 |
-| item_genre | 10 | 8 |
-| shelf | 25 | 16 |
-| author | 15 | 12 |
-| year | 10 | 8 |
-| timestamp | 10 | 8 |
-
-New dims: user = 32+32+8 = 72 → 256 → 128; item = 8+16+32+12+8 = 76 → 256 → 128.
-
-**3. Initialization fix (critical — model won't learn without this)**
-- Sub-tower linear layers: `gain=0.01 → 0.1`
-- Projection linear layers: re-initialized separately to `gain=1.0` after the rest of the model
-- Embedding tables: stay at `gain=0.01`
-
-Without this, the projection adds two extra layers of `gain=0.01` on top of already-small sub-tower outputs — dot products collapse to exactly zero at step 0 and the model never recovers.
+2. **Item tower pooling** (`use_item_pool_for_history=True`) — user history pool uses the full 128-dim projected item embedding instead of the raw 32-dim book ID embedding. Captures shelf + genre + author signals from the user's read history. User concat changes from 72-dim (32+32+8) to 168-dim (128+32+8). Hit Rate@10: 13.0% → 14.0% (+8%).
 
 ## Future Improvements
 
@@ -247,13 +231,14 @@ Without this, the projection adds two extra layers of `gain=0.01` on top of alre
 
 **~~Sampled softmax~~** — ✅ Implemented and validated. Softmax is now the primary training path (`python main.py train softmax`). ID embeddings gained semantic structure vs BPR (King/horror cluster, LOTR/fantasy cluster confirmed via probe and canary). Canary results are strong for Literary, NonFiction, Fantasy, Sci-Fi, History, YA. Known weak spots: Horror (no horror genre in vocab — relies purely on shelf signals) and Romance (model conflates literary women's fiction with romance).
 
-**⚠️ Retraining required:** The year feature vocab changed — `preprocess books` was updated to use original publication year (from `goodreads_book_works.json`) instead of edition year. Year vocab indices are now different from the current checkpoint. The serving app displays correct years (from `bookId_to_year` in the feature store, not the model), but year embedding quality will be degraded until the model is retrained from scratch (`python main.py features && python main.py dataset softmax && python main.py train softmax`).
+**Year feature:** `preprocess books` uses original publication year. Current checkpoint (`best_proj_softmax_ipool_20260426_093432.pth`) was trained with correct year vocab — no retraining needed.
 
 **Next training improvements:**
 1. **~~LR schedule~~** — ✅ Implemented. CosineAnnealingLR from 0.001→0 over training steps. Eliminated the early plateau seen in the first softmax run.
 2. **~~Larger batch~~** — ✅ 512 (511 in-batch negatives). Confirmed better drop-from-baseline than batch=256.
 3. **~~In-batch negative debiasing (log-frequency correction)~~** — ❌ Tried and removed. Subtracting `log(p_i)` from negative logits (Yi et al., Google RecSys 2019) did not converge on this dataset. Root causes: (a) with ~11k books, the item frequency distribution is very compressed — corrections ranged from 4.91 to 10.0 with ~87% of books clustered near 9-10, so the correction added almost no useful signal. (b) The correction destabilized training even with L2 normalization and diagonal zeroing. Do not re-attempt without a much larger, more skewed item distribution.
-4. **Remove F.normalize from training (match YouTube paper)** — ⚠️ Code change made, **retrain required**. The previous softmax training loop applied `F.normalize` to both U and V before the dot product, making training optimize cosine similarity instead of inner product. The YouTube DNN paper uses raw dot products throughout — no L2 normalization. This created a training/inference mismatch: inference used raw dot products (matching the paper) but training used cosine (deviating from it). Empirically confirmed: Poetry Lover recommendations degraded from poetry books to graphic novels when inference was switched to cosine — the model's embedding magnitudes carry real signal (specific, well-differentiated items have larger norms) that cosine discards. `F.normalize` has been removed from `train_softmax`. Eval numbers and canary results from the current checkpoint (`best_softmax_20260412_093406.pth`) are still valid because inference already used raw dot products; they just reflect a model trained with a suboptimal objective. After retraining, re-run `python main.py eval` and update the results table.
+4. **~~Remove F.normalize from training (match YouTube paper)~~** — ✅ Done and validated. Raw dot products used in both training and inference.
+5. **~~Item tower pooling~~** — ✅ Implemented as `use_item_pool_for_history=True` (default in softmax config). User history pool uses full 128-dim projected item embeddings instead of 32-dim raw ID embeddings. Captures shelf + genre + author signals from read history. Hit Rate@10: 13.0% → 14.0% (+8%). Training is ~8x slower due to the 3032-dim shelf MLP being called B×H times per step (see full item tower pooling note in YouTube DNN section for proposed optimization).
 
 **Implicit vs explicit feedback tradeoff** — explicit ratings (BPR) give clean preference signal but are sparse. Implicit feedback (reads via `is_read`) is abundant but noisy. Consider a hybrid: softmax for candidate generation, explicit ratings for a separate ranking stage.
 
@@ -271,17 +256,31 @@ Without this, the projection adds two extra layers of `gain=0.01` on top of alre
 
 **Results (5,000 val users, corpus ~11k books, random Hit Rate@10 baseline ≈ 0.88%):**
 
-| Metric | MSE | BPR | Softmax | **Softmax + Projection** |
-|---|---|---|---|---|
-| Hit Rate@10 | 4.7% | 3.5% | 10.7% | **13.0%** |
-| Hit Rate@50 | 17.6% | 14.4% | 28.9% | **33.0%** |
-| Recall@10 | 0.0069 | 0.0041 | 0.0164 | **0.0241** |
-| NDCG@10 | 0.0073 | 0.0042 | 0.0189 | **0.0255** |
-| MRR | 0.024 | 0.016 | 0.053 | **0.064** |
+| Metric | MSE | BPR | Softmax | Softmax + Projection | **+ Item Tower Pool** |
+|---|---|---|---|---|---|
+| Hit Rate@10 | 4.7% | 3.5% | 10.7% | 13.0% | **14.0%** |
+| Hit Rate@50 | 17.6% | 14.4% | 28.9% | 33.0% | **36.3%** |
+| Recall@10 | 0.0069 | 0.0041 | 0.0164 | 0.0241 | **0.0258** |
+| NDCG@10 | 0.0073 | 0.0042 | 0.0189 | 0.0255 | **0.0274** |
+| MRR | 0.024 | 0.016 | 0.053 | 0.064 | **0.067** |
 
-Softmax + Projection is ~2.8× better than MSE and ~3.7× better than BPR on Hit Rate@10. Adding projection MLPs improved Hit Rate@10 by 21% over flat softmax (10.7% → 13.0%).
+Item tower pooling is ~3.0× better than MSE and ~4.0× better than BPR on Hit Rate@10. Cumulative improvements: softmax +127%, projection MLP +21%, item tower pooling +8%.
 
-**Checkpoint naming convention:** loss type and architecture are encoded in the filename — `best_mse_*`, `best_bpr_*`, `best_softmax_*` (flat, legacy), `best_proj_softmax_*` (projection MLP). `_resolve_checkpoint` and `_load_model_and_embeddings` in `evaluate.py` auto-detect the correct config from the prefix. **Note:** `best_softmax_` checkpoints use the flat architecture (no projection) with the old embedding sizes. `best_proj_softmax_` checkpoints (2026-04-24+) use the projection MLP architecture.
+**Canary quality highlights (ipool vs proj_softmax):**
+- **Sci-Fi**: Significantly more specific hard SF — Revelation Space, Accelerando, The Mote in God's Eye appear vs generic Honor Harrington. Richer content signal in the user pool captures subgenre distinctions.
+- **Poetry**: All 10 recommendations are actual poetry collections (vs art books in older checkpoints). Item tower pool captures the shelf+genre signal of poetry books in the user's taste representation.
+- **Economics**: Clean — all 10 are finance/economics titles.
+- **Horror**: Stronger — tighter horror cluster (The Rats, Hell House, Swan Song, Cabal) vs diluted results from older checkpoints.
+- **Nick (personal canary)**: Better historical/WWII focus (Battle Cry of Freedom, Flags of Our Fathers, With the Old Breed) vs financial noise from older checkpoint.
+
+**Checkpoint naming convention:** loss type and architecture encoded in filename:
+- `best_mse_*` — MSE loss, flat architecture
+- `best_bpr_*` — BPR pairwise loss, flat architecture
+- `best_softmax_*` — flat softmax (legacy, no projection MLP)
+- `best_proj_softmax_*` — projection MLP, `use_item_pool_for_history=False`
+- `best_proj_softmax_ipool_*` — projection MLP + item tower pooling (**current prod**)
+
+`_resolve_checkpoint` and `_load_model_and_embeddings` in `evaluate.py` and `run_export` in `export.py` auto-detect config from the prefix. The non-ipool branch explicitly pins `use_item_pool_for_history=False` to be immune to config default changes.
 
 ### YouTube DNN implementation details (Covington et al., 2016)
 

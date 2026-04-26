@@ -32,11 +32,11 @@ USER_TYPE_TO_FAVORITE_GENRES = {
     'Romance Lover':   ['romance'],
     'YA Lover':        ['young-adult'],
     'History Lover':   ['history, biography'],
-    'Classic Lover':     [''],
+    'Classic Lover':     [],
     'Horror Lover':       [],  # no horror genre in vocab — relies on shelf tags + books
     'Sci-Fi Lover':       [],  # no sci-fi genre in vocab — relies on shelf tags + books
     'NonFiction Lover':   ['non-fiction'],
-    'Economics Lover':  [''],
+    'Economics Lover':  [],
     'Manga Lover':      [],  # no manga genre in vocab — relies on shelf tags + books
     'Poetry Lover':     ['poetry'],
     "Children's Book Lover": ['children'],
@@ -188,6 +188,8 @@ USER_TYPE_TO_FAVORITE_BOOKS = {
         'Death Note, Vol. 2: Confluence (Death Note, #2)',
         'Naruto, Vol. 01: The Tests of the Ninja (Naruto, #1)',
         'Bleach, Volume 01',
+        'Hunter x Hunter, Vol. 01 (Hunter x Hunter, #1)',
+        'One Piece, Volume 01: Romance Dawn (One Piece, #1)'
     ],
     'Poetry Lover': [
         'Leaves of Grass',
@@ -343,12 +345,12 @@ USER_TYPE_TO_SHELF_TAGS = {
     'Romance Lover':   ['romance', 'love-story', 'chick-lit'],
     'YA Lover':        ['young-adult', 'ya', 'coming-of-age'],
     'History Lover':   ['history', 'historical'],
-    'Classic Lover':  ['classics'],
+    'Classic Lover':   ['classics'],
     'Horror Lover':    ['horror'],
     'Sci-Fi Lover':    ['science-fiction', 'sci-fi'],
     'NonFiction Lover':  ['non-fiction'],
     'Economics Lover': ['economics'],
-    'Manga Lover':     [''],
+    'Manga Lover':     ['shonen'],
     'Poetry Lover':    ['poetry'],
     "Children's Book Lover": ['childrens', 'children-s', 'picture-books'],
 }
@@ -748,6 +750,7 @@ def _load_model_and_embeddings(checkpoint_path: str, fs):
         config['use_item_pool_for_history'] = True
     elif basename.startswith('best_proj_softmax_') or basename.startswith('proj_softmax_'):
         config = get_softmax_config()
+        config['use_item_pool_for_history'] = False
     elif basename.startswith('best_softmax_') or basename.startswith('softmax_'):
         config = get_softmax_config_legacy()
     else:
