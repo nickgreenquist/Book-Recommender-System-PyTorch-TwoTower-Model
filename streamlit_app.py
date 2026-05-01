@@ -62,6 +62,7 @@ def load_artifacts():
         author_embedding_size=cfg['author_embedding_size'],
         shelf_embedding_size=cfg['shelf_embedding_size'],
         user_genre_embedding_size=cfg['user_genre_embedding_size'],
+        user_shelf_affinity_embedding_size=cfg['user_shelf_affinity_embedding_size'],
         timestamp_embedding_size=cfg['timestamp_embedding_size'],
         item_genre_embedding_size=cfg['item_genre_embedding_size'],
         item_year_embedding_size=cfg['item_year_embedding_size'],
