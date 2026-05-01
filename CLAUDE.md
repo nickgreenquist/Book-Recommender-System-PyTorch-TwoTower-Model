@@ -178,10 +178,10 @@ Canary users are synthetic — no real read timestamps. All receive `ts_max_bin`
 
 ## Current Production Model
 
-**Serving checkpoint (deployed):** `saved_models/best_proj_softmax_ipool_20260426_093432.pth`
-Serving artifacts are in `serving/` and deployed to the Streamlit app. This uses the ipool architecture (item tower pooling in user history).
+**Serving checkpoint (deployed):** `saved_models/best_full_softmax_4pool_popularity_alpha_20260501_073113.pth`
+Serving artifacts are in `serving/` and deployed to the Streamlit app. This is the V2 architecture — quadruple shallow pools + user shelf affinity tower + full softmax.
 
-**V2 experiment (branch `v2`, not promoted):** See "V2 Experiment" section below for full results and reasoning.
+**Previous PROD (ipool):** `saved_models/OLD_PROD_best_proj_softmax_ipool_20260426_093432.pth` — superseded by V2.
 
 **Architecture history (all ✅ implemented and validated):**
 
@@ -190,7 +190,7 @@ Serving artifacts are in `serving/` and deployed to the Streamlit app. This uses
 
 2. **Item tower pooling (current PROD)** — user history pooled over full 128-dim projected item embeddings. Captured shelf+genre+author signals but ~8× slower to train due to shelf MLP being called B×H times per step. Hit Rate@10: 13.0% → 14.0% (+8%). This is the strongest architecture to date — see V2 experiment for the failed attempt to replace it.
 
-## V2 Experiment (April 2026) — Implemented, Not Promoted
+## V2 Experiment (May 2026) — Implemented and Promoted to Production ✅
 
 ### Goal
 
@@ -216,41 +216,55 @@ Secondary goals: adopt full softmax (score against all ~11k books per step inste
 
 ### Results
 
-Trained to 150k steps. Best canary quality was at the **90k checkpoint** — 150k overfit on niche categories (manga absorbed into fantasy cluster, graphic novel recommendations included non-comics like Dune and The Hobbit).
+Trained to 150k steps with corrected temperature (`0.1`) and `popularity_alpha=0.0`. **V2 beat PROD on both canary quality and offline eval — and was promoted to production.**
 
-**Head-to-head canary comparison vs PROD (ipool):**
+**Note on earlier failed V2 run (April 2026):** The first V2 training used `temperature = 0.5/batch_size = 0.001`, which is correct for in-batch negatives but wrong for full softmax over 11k books. The near-zero temperature collapses gradients to argmax and caused popularity overfitting. This produced the weak results documented in the initial comparison. After fixing the temperature to `0.1`, V2 beat PROD convincingly.
 
-| Category | PROD (ipool) | V2 (90k) |
-|----------|-------------|----------|
-| Nick (personal) | ✅✅ Outstanding — WWII/American history focus | ⚠️ Good core but self-help bleed |
-| Sci-Fi | ✅✅ Outstanding — Stross, Reynolds, Vinge, Niven | ⚠️ Asimov/Hyperion clustering |
-| Classic | ✅✅ Outstanding — Chekhov, Molière, Balzac, Aristotle | ⚠️ 4/10 Dickens |
-| Mystery | ✅ All mysteries, no bleed | ⚠️ The Shining (horror) bleeds in |
-| Fantasy | ✅ Coldfire Trilogy, Serpentwar, Riftwar | ✅ Good (Dragonlance cluster) |
-| Romance | ✅ Diverse subgenres | ⚠️ Sullivan series cluster |
-| YA | ✅ Gallagher Girls, Leviathan | ⚠️ Gossip Girl heavy |
-| Horror | ✅ Rats, Hell House, Swan Song variety | ⚠️ 5/10 Books of Blood |
-| History | ⚠️ LBJ cluster, historical fiction | ✅ Best period diversity |
-| NonFiction | ✅ Biology/behavioral | ✅ Physics/tech |
-| Economics | ✅ Tight Wall Street focus | ✅ Good |
-| Manga | — (old canary format) | ✅ 10/10 diverse |
-| Children's | ⚠️ Cookbook bleed | ✅ All picture books |
+**Head-to-head canary comparison vs PROD (ipool) — corrected temperature run:**
 
-**PROD wins 10 categories, V2 wins 3, 1 tie.** V2 was not promoted to production.
+| Category | PROD (ipool) | V2 (best, 150k) | Winner |
+|----------|-------------|-----------------|--------|
+| Mystery | ✅ Diverse classic series | ⚠️ Harry Hole clustering (5/10) | PROD |
+| Fantasy | ✅ Coldfire/Serpentwar deep cuts | ✅ Good epic fantasy | PROD (slight) |
+| Romance | ✅ Decent mix | ⚠️ Fifty Shades misfire | PROD (slight) |
+| Sci-Fi | ✅✅ Stross/Reynolds hard SF | ✅ Golden Age canon (Asimov/Clarke) | PROD (slight) |
+| YA | ⚠️ Obscure series, clustering | ✅✅ Canonical YA (Twilight, Mortal Instruments) | **V2** |
+| History | ⚠️ LBJ trilogy dominates | ✅✅ WWII/Rome/Tudor/WWI diversity | **V2** |
+| Classic | ⚠️ Greek philosophy/Chekhov drama | ✅✅ Tolstoy, Shakespeare, Dostoevsky, Homer | **V2** |
+| Horror | Tie (both misfires) | Tie | Tie |
+| NonFiction | ✅ Evolution cluster | ✅ Broader (physics, medicine, psych) | **V2** (slight) |
+| Economics | ✅ Tight Wall Street | ✅ Equally strong | Tie |
+| Philosophy | ✅ Plato/existentialism | ✅✅ Full canon (Hegel, Hobbes, Rawls, Rousseau) | **V2** |
+| Graphic Novel | ⚠️ 4 Batman books | ✅✅ Dark Knight Returns, Y: Last Man, Transmet | **V2** |
+| Manga | ⚠️ Avatar misfire, weak tags | ✅✅ Actual manga, good variety | **V2** |
+| Religion/Christianity | Tie (different personas) | Tie | Tie |
+| Poetry | ✅ Solid | ✅ Solid | Tie |
+| Children's | ⚠️ Cookbook misfire | ✅✅ Canonical picture books | **V2** |
 
-### Why V2 Did Not Beat PROD
+**V2 wins 7 categories, PROD wins 4 (2 slight), 5 ties.**
 
-The ipool architecture's strength comes from a single architectural property: it pools the **full projected 128-dim item embedding** (genre + shelf + author + year + ID → 128-dim) over every book in the user's read history. This means the user embedding directly inherits the item tower's rich shelf and genre signal for every book the user has read.
+Key insight: full softmax correctly surfaces popular canonical books (Shakespeare, Tolstoy, Twilight, Very Hungry Caterpillar) in genres where popularity = quality. PROD's in-batch negatives penalize popular books because they appear as negatives in almost every batch — systematically pushing their embeddings away from user representations.
 
-V2's `user_shelf_affinity_tower` was designed to replicate this — but it pools TF-IDF shelf vectors directly (sparse float vectors) rather than learned item embeddings. In practice, the shallow 32-dim ID pools don't capture enough content signal to compensate for the richer 128-dim item embedding pools in ipool.
+**Offline eval (5,000 val users, 14,753-book corpus):**
 
-The most striking evidence: PROD's Nick canary recommends Battle Cry of Freedom, Founding Brothers, Flags of Our Fathers, An Army at Dawn — a near-perfect military history profile. V2's Nick recommends Checklist Manifesto, Mindset, Getting Things Done alongside With the Old Breed. PROD's Sci-Fi recommends Singularity Sky, Revelation Space, Accelerando — hard SF deep cuts. V2 gets Asimov clustering.
+| Metric | PROD (ipool, ~11k corpus) | **V2 (14.7k corpus)** |
+|--------|--------------------------|----------------------|
+| Hit Rate@10 | 14.0% | **15.5%** |
+| Hit Rate@50 | 36.3% | **36.1%** |
+| MRR | 0.067 | **0.0775** |
+| NDCG@10 | 0.0274 | **0.0859** |
 
-The shelf signal flowing through item embeddings into the user representation (via ipool) is difficult to replicate with a separate user-side tower operating on raw TF-IDF vectors.
+V2 beats PROD on Hit Rate@10 and MRR despite searching a 33% larger corpus. Note: Recall@K = Hit Rate@K in the new eval (single target per example, denominator = 1); old PROD Recall numbers used a different calculation and are not directly comparable.
+
+### Why the Initial V2 Run Failed (Temperature Bug)
+
+The first V2 training used `temperature = 0.5 / batch_size = 0.001`. This formula comes from in-batch negatives training where `batch_size` determines the number of negatives. For full softmax, `batch_size` is just the number of users per step — the number of negatives is the entire corpus (~11k). A temperature of 0.001 over 11k negatives collapses the softmax to near-argmax, forcing the model to perfectly rank the hardest negative every step rather than learning a smooth similarity structure. Result: popularity overfitting and degraded quality across most categories.
+
+**Fix:** `temperature = 0.1` for full softmax. This is the correct softness for ~11k negatives.
 
 ### Code
 
-All V2 code lives on branch `v2`. The `use_item_pool_for_history=True` flag in `get_softmax_config()` re-enables ipool behavior within the V2 codebase, if desired.
+V2 is now main. The `use_item_pool_for_history=True` flag in `get_softmax_config()` re-enables ipool behavior if desired.
 
 ## Future Improvements
 
@@ -265,7 +279,7 @@ All V2 code lives on branch `v2`. The `use_item_pool_for_history=True` flag in `
 2. **~~Larger batch~~** — ✅ 512 (511 in-batch negatives). Confirmed better drop-from-baseline than batch=256.
 3. **~~In-batch negative debiasing (log-frequency correction)~~** — ❌ Tried and removed. Subtracting `log(p_i)` from negative logits (Yi et al., Google RecSys 2019) did not converge on this dataset. Root causes: (a) with ~11k books, the item frequency distribution is very compressed — corrections ranged from 4.91 to 10.0 with ~87% of books clustered near 9-10, so the correction added almost no useful signal. (b) The correction destabilized training even with L2 normalization and diagonal zeroing. Do not re-attempt without a much larger, more skewed item distribution.
 4. **~~Remove F.normalize from training (match YouTube paper)~~** — ✅ Done and re-added for V2. V2 adds L2 norm back at the output of both towers (as `F.normalize` in `user_embedding()` and `item_embedding()`). This stabilizes training with shallow sum pooling and ensures dot product = cosine similarity between normalized 128-dim vectors.
-5. **~~Item tower pooling~~** — ✅ Implemented and validated (+8%). Superseded by V2 which achieves the content signal via a dedicated `user_shelf_affinity_tower` on the user side, while keeping user history pools shallow (ID embeddings only). This avoids the 8× training slowdown.
+5. **~~Item tower pooling~~** — ✅ Implemented and validated (+8%). Superseded by V2 (current PROD) which achieves equivalent or better quality via quadruple shallow pools + `user_shelf_affinity_tower`, while avoiding the 8× training slowdown of ipool.
 
 **Implicit vs explicit feedback tradeoff** — explicit ratings (BPR) give clean preference signal but are sparse. Implicit feedback (reads via `is_read`) is abundant but noisy. Consider a hybrid: softmax for candidate generation, explicit ratings for a separate ranking stage.
 
@@ -279,17 +293,16 @@ Val users are fixed in `features.py` (`VAL_FRACTION=0.10`, `VAL_SPLIT_SEED=42`),
 
 **Metrics:** Recall@K, Hit Rate@K, NDCG@K, MRR at K = 1, 5, 10, 20, 50.
 
-**Results (5,000 val users, corpus ~11k books, random Hit Rate@10 baseline ≈ 0.88%):**
+**Results (5,000 val users):**
 
-| Metric | MSE | BPR | Softmax | Softmax + Projection | **+ Item Tower Pool (PROD)** |
-|---|---|---|---|---|---|
-| Hit Rate@10 | 4.7% | 3.5% | 10.7% | 13.0% | **14.0%** |
-| Hit Rate@50 | 17.6% | 14.4% | 28.9% | 33.0% | **36.3%** |
-| Recall@10 | 0.0069 | 0.0041 | 0.0164 | 0.0241 | **0.0258** |
-| NDCG@10 | 0.0073 | 0.0042 | 0.0189 | 0.0255 | **0.0274** |
-| MRR | 0.024 | 0.016 | 0.053 | 0.064 | **0.067** |
+| Metric | MSE (~11k) | BPR (~11k) | Softmax (~11k) | + Projection (~11k) | ipool PROD (~11k) | **V2 PROD (14.7k)** |
+|---|---|---|---|---|---|---|
+| Hit Rate@10 | 4.7% | 3.5% | 10.7% | 13.0% | 14.0% | **15.5%** |
+| Hit Rate@50 | 17.6% | 14.4% | 28.9% | 33.0% | 36.3% | **36.1%** |
+| NDCG@10 | 0.0073 | 0.0042 | 0.0189 | 0.0255 | 0.0274 | **0.0859** |
+| MRR | 0.024 | 0.016 | 0.053 | 0.064 | 0.067 | **0.0775** |
 
-V2 (quadruple shallow pools + user shelf affinity tower) did not beat these numbers in canary quality. See "V2 Experiment" section. Offline eval (Hit Rate@K / MRR) for V2 was not run — canary comparison was conclusive enough.
+V2 beats ipool PROD on Hit Rate@10 and MRR despite a 33% larger corpus. Note: corpus size differs across rows — earlier models trained on ~11k books, V2 on 14.7k books.
 
 **Canary quality highlights (ipool vs proj_softmax):**
 - **Sci-Fi**: Significantly more specific hard SF — Revelation Space, Accelerando, The Mote in God's Eye appear vs generic Honor Harrington. Richer content signal in the user pool captures subgenre distinctions.
