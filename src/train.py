@@ -4,6 +4,7 @@ In-batch negatives softmax training.
 Usage:
     python main.py train
 """
+import json
 import os
 import time
 from datetime import datetime
@@ -11,7 +12,7 @@ from datetime import datetime
 import numpy as np
 import torch
 import torch.nn.functional as F
-from src.dataset import FeatureStore, pad_history_batch, pad_history_ratings_batch
+from src.dataset import FeatureStore
 from src.model import BookRecommender
 
 
@@ -19,29 +20,33 @@ from src.model import BookRecommender
 
 def get_softmax_config() -> dict:
     """All training hyperparameters in one place."""
-    return {
+    config = {
         # Sub-embedding sizes — projection MLP handles cross-feature interactions.
         'item_id_embedding_size':    32,   # shared: item tower lookup + user history pool
-        'user_genre_embedding_size': 32,
+        'user_genre_embedding_size': 16,
+        'user_shelf_affinity_embedding_size': 64,
         'timestamp_embedding_size':  8,
-        'item_genre_embedding_size': 10,
-        'shelf_embedding_size':      40,   # richest signal: 3032-dim TF-IDF → 2-layer MLP
-        'author_embedding_size':     10,
+        'item_genre_embedding_size': 16,
+        'shelf_embedding_size':      64,   # richest signal: 3032-dim TF-IDF → 2-layer MLP
+        'author_embedding_size':     16,
         'item_year_embedding_size':  8,
-        # item concat: 10+40+32+10+8 = 100; user concat (ipool): 128+32+8 = 168
+        # item concat: 10+40+32+10+8 = 100; user concat (v2): 4*32+16+64+8 = 216
         # Projection MLP  (concat → Linear(proj_hidden) → ReLU → Linear(output_dim))
         'proj_hidden':  256,
         'output_dim':   128,
         # Training
         'lr':               0.001,
-        'weight_decay':     1e-5,
-        'minibatch_size':   512,    # in-batch negatives: larger batch = more negatives
-        'temperature':      0.05,   # softmax temperature (scales logits before cross-entropy)
+        'weight_decay':     0.0,
+        'adam_eps':         1e-6,
+        'minibatch_size':   512,
+        'popularity_alpha': 0.4,    # logit-space penalty: alpha * log1p(ratings_count); 0=off
         'training_steps':   150_000,
         'log_every':        5_000,
         'checkpoint_every': 30_000,
         'checkpoint_dir':   'saved_models',
     }
+    config['temperature'] = 0.5 / config['minibatch_size']
+    return config
 
 
 # ── Model factory ─────────────────────────────────────────────────────────────
@@ -89,6 +94,7 @@ def build_model(config: dict, fs: FeatureStore) -> BookRecommender:
         author_embedding_size=config['author_embedding_size'],
         shelf_embedding_size=config['shelf_embedding_size'],
         user_genre_embedding_size=config['user_genre_embedding_size'],
+        user_shelf_affinity_embedding_size=config['user_shelf_affinity_embedding_size'],
         timestamp_embedding_size=config['timestamp_embedding_size'],
         item_genre_embedding_size=config['item_genre_embedding_size'],
         item_year_embedding_size=config['item_year_embedding_size'],
@@ -100,6 +106,7 @@ def build_model(config: dict, fs: FeatureStore) -> BookRecommender:
 def print_model_summary(model: BookRecommender) -> None:
     m = model
     genre_dim = m.user_genre_tower[-2].out_features
+    shelf_aff_dim = m.user_shelf_affinity_tower[-2].out_features
     ts_dim    = m.timestamp_embedding_lookup.embedding_dim
 
     item_genre_dim  = m.item_genre_tower[-2].out_features
@@ -110,13 +117,13 @@ def print_model_summary(model: BookRecommender) -> None:
     item_concat     = item_genre_dim + item_shelf_dim + item_book_dim + item_author_dim + year_dim
 
     output_dim = m.output_dim
-    pool_dim   = m.user_projection[2].out_features
-    user_total = pool_dim + genre_dim + ts_dim
+    pool_dim   = 4 * m.item_embedding_lookup.embedding_dim
+    user_total = pool_dim + genre_dim + shelf_aff_dim + ts_dim
 
     n_params = sum(p.nelement() for p in model.parameters() if p.requires_grad)
 
     print(f"\n── Model dimensions ──")
-    print(f"  User side:  item_pool({pool_dim}) + genre({genre_dim}) + ts({ts_dim})"
+    print(f"  User side:  shallow_pools({pool_dim}) + genre({genre_dim}) + shelf_aff({shelf_aff_dim}) + ts({ts_dim})"
           f"  =  {user_total}  → proj →  {output_dim}")
     print(f"  Item side:  genre({item_genre_dim}) + shelf({item_shelf_dim})"
           f" + book({item_book_dim}) + author({item_author_dim}) + year({year_dim})"
@@ -124,16 +131,26 @@ def print_model_summary(model: BookRecommender) -> None:
     print(f"  Parameters: {n_params:,}")
 
 
+def get_device():
+    if torch.backends.mps.is_available():
+        return torch.device("mps")
+    elif torch.cuda.is_available():
+        return torch.device("cuda")
+    else:
+        return torch.device("cpu")
+
+
 # ── Softmax training (in-batch negatives) ─────────────────────────────────────
 
 def train_softmax(model: BookRecommender, train_data: tuple, val_data: tuple,
                   config: dict, fs: FeatureStore) -> str:
     """
-    Train with in-batch negatives cross-entropy (softmax).
+    Train with full softmax cross-entropy.
 
-    train_data / val_data: 5-tuple from dataset.build_softmax_dataset()
-      (X_genre, X_history, X_history_ratings, timestamp, target_book_idx)
-    Item features are looked up from model buffers during item_embedding().
+    train_data / val_data: 8-tuple from dataset.build_softmax_dataset()
+      (X_genre, X_hist_full, X_hist_liked, X_hist_disliked,
+       X_hist_weighted, X_rats_weighted, timestamp, target_book_idx)
+    History tensors are pre-padded; item features looked up from model buffers.
 
     Each minibatch of size B computes:
       U = user_embedding(...)         (B, dim)
@@ -141,20 +158,44 @@ def train_softmax(model: BookRecommender, train_data: tuple, val_data: tuple,
       scores = U @ V.T / temperature  (B, B)
       loss   = cross_entropy(scores, arange(B))   target is always on the diagonal
     """
-    (X_genre_train, X_history_train, X_history_ratings_train, timestamp_train,
+    device = get_device()
+    print(f"Using device: {device}")
+    model.to(device)
+
+    (X_genre_train, X_hist_full_train, X_hist_liked_train, X_hist_disliked_train,
+     X_hist_weighted_train, X_rats_weighted_train, timestamp_train,
      target_book_idx_train) = train_data
 
-    (X_genre_val, X_history_val, X_history_ratings_val, timestamp_val,
+    (X_genre_val, X_hist_full_val, X_hist_liked_val, X_hist_disliked_val,
+     X_hist_weighted_val, X_rats_weighted_val, timestamp_val,
      target_book_idx_val) = val_data
+
+    # Move compact tensors to device; history tensors stay on CPU (too large), moved per batch
+    X_genre_train = X_genre_train.to(device)
+    timestamp_train = timestamp_train.to(device)
+    target_book_idx_train = target_book_idx_train.to(device)
+
+    X_genre_val = X_genre_val.to(device)
+    timestamp_val = timestamp_val.to(device)
+    target_book_idx_val = target_book_idx_val.to(device)
 
     print_model_summary(model)
 
+    # ── Popularity logit penalty (Menon et al. 2021) ──────────────────────────
+    # Subtract alpha * log1p(ratings_count_i) from item i's logit before softmax.
+    # Discourages the model from learning "popular = universally good."
+    item_counts     = torch.from_numpy(fs.book_interaction_counts)
+    popularity_bias = (config['popularity_alpha'] * torch.log1p(item_counts)).to(device)
+    print(f"  Popularity bias: alpha={config['popularity_alpha']}  "
+          f"max_adj={popularity_bias.max():.3f}  min_adj={popularity_bias.min():.3f}")
+
     pad_idx          = len(fs.top_books)
     optimizer        = torch.optim.Adam(model.parameters(), lr=config['lr'],
-                                        weight_decay=config['weight_decay'])
+                                        weight_decay=config['weight_decay'],
+                                        eps=config['adam_eps'])
     training_steps   = config['training_steps']
     scheduler        = torch.optim.lr_scheduler.CosineAnnealingLR(
-                           optimizer, T_max=training_steps, eta_min=0)
+                           optimizer, T_max=training_steps, eta_min=1e-4)
     minibatch_size   = config['minibatch_size']
     temperature      = config['temperature']
     log_every        = config['log_every']
@@ -167,13 +208,20 @@ def train_softmax(model: BookRecommender, train_data: tuple, val_data: tuple,
     os.makedirs(checkpoint_dir, exist_ok=True)
     run_timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
     best_val_loss = float('inf')
-    best_path     = os.path.join(checkpoint_dir, f'best_proj_softmax_ipool_{run_timestamp}.pth')
+    best_path     = os.path.join(checkpoint_dir, f'best_full_softmax_4pool_popularity_alpha_{run_timestamp}.pth')
+
+    # Fixed val subset — sampled once so val_loss is comparable across steps
+    val_eval_size = min(8_192, n_val)
+    rng_val = torch.Generator()
+    rng_val.manual_seed(0)
+    val_eval_idx = torch.randperm(n_val, generator=rng_val)[:val_eval_size].tolist()
 
     loss_train = []
+    grad_norms = []
 
     print(f"\nStarting softmax training ({training_steps:,} steps, "
-          f"batch={minibatch_size}, temp={temperature}) ...")
-    print(f"  Train: {n_train:,} examples  |  Val: {n_val:,} examples")
+          f"batch={minibatch_size}, temp={temperature:.6f}) ...")
+    print(f"  Train: {n_train:,} examples  |  Val: {n_val:,} examples (eval subset: {val_eval_size:,})")
     start = time.time()
 
     from tqdm import tqdm
@@ -184,14 +232,19 @@ def train_softmax(model: BookRecommender, train_data: tuple, val_data: tuple,
         if is_val:
             model.eval()
             with torch.no_grad():
+                V_all = model.full_item_embedding()
                 if i == 0:
                     # Logit diagnostics on one batch at step 0
-                    vidx       = torch.randint(0, n_val, (minibatch_size,)).tolist()
-                    vhp        = pad_history_batch([X_history_val[j] for j in vidx], pad_idx)
-                    vrp        = pad_history_ratings_batch([X_history_ratings_val[j] for j in vidx])
-                    U          = model.user_embedding(X_genre_val[vidx], vhp, vrp, timestamp_val[vidx])
-                    V          = model.item_embedding(target_book_idx_val[vidx])
-                    raw_scores = U @ V.T
+                    vidx = torch.randint(0, n_val, (minibatch_size,))
+                    h_full     = X_hist_full_val[vidx].to(device)
+                    h_liked    = X_hist_liked_val[vidx].to(device)
+                    h_disliked = X_hist_disliked_val[vidx].to(device)
+                    h_weighted = X_hist_weighted_val[vidx].to(device)
+                    r_weighted = X_rats_weighted_val[vidx].to(device)
+
+                    U = model.user_embedding(X_genre_val[vidx], h_full, h_liked, h_disliked,
+                                             h_weighted, r_weighted, timestamp_val[vidx])
+                    raw_scores = U @ V_all.T
                     scores     = raw_scores / temperature
                     print(f"  [logit diagnostics] raw dot products — "
                           f"mean={raw_scores.mean().item():.6f}  "
@@ -203,55 +256,71 @@ def train_softmax(model: BookRecommender, train_data: tuple, val_data: tuple,
                           f"std={scores.std().item():.6f}  "
                           f"min={scores.min().item():.6f}  "
                           f"max={scores.max().item():.6f}")
-                    print(f"  [logit diagnostics] random baseline loss = {np.log(minibatch_size):.4f}")
+                    print(f"  [logit diagnostics] random baseline loss = {np.log(V_all.shape[0]):.4f}")
 
-                # Full val: iterate over all val examples in batches, average cross-entropy
-                val_loss_sum = 0.0
-                val_batches  = 0
-                for v0 in range(0, n_val, minibatch_size):
-                    v1   = min(v0 + minibatch_size, n_val)
-                    vidx = list(range(v0, v1))
-                    vhp  = pad_history_batch([X_history_val[j] for j in vidx], pad_idx)
-                    vrp  = pad_history_ratings_batch([X_history_ratings_val[j] for j in vidx])
-                    U    = model.user_embedding(X_genre_val[v0:v1], vhp, vrp, timestamp_val[v0:v1])
-                    V    = model.item_embedding(target_book_idx_val[v0:v1])
-                    scores = (U @ V.T) / temperature
-                    labels = torch.arange(len(vidx))
-                    val_loss_sum += F.cross_entropy(scores, labels).item()
-                    val_batches  += 1
-                val_loss = val_loss_sum / val_batches
-            avg_train  = np.mean(loss_train[i - log_every:i]) if i >= log_every else (loss_train[-1] if loss_train else 0.0)
+                # Fixed val subset — same examples every step for comparable loss
+                val_losses = []
+                for vs in range(0, val_eval_size, minibatch_size):
+                    ve   = min(vs + minibatch_size, val_eval_size)
+                    vidx = val_eval_idx[vs:ve]
+
+                    h_full     = X_hist_full_val[vidx].to(device)
+                    h_liked    = X_hist_liked_val[vidx].to(device)
+                    h_disliked = X_hist_disliked_val[vidx].to(device)
+                    h_weighted = X_hist_weighted_val[vidx].to(device)
+                    r_weighted = X_rats_weighted_val[vidx].to(device)
+
+                    U = model.user_embedding(X_genre_val[vidx], h_full, h_liked, h_disliked,
+                                             h_weighted, r_weighted, timestamp_val[vidx])
+                    scores = (U @ V_all.T) / temperature - popularity_bias
+                    labels = target_book_idx_val[vidx]
+                    val_losses.append(F.cross_entropy(scores, labels).item())
+                val_loss = float(np.mean(val_losses))
+            avg_train     = np.mean(loss_train[i - log_every:i]) if i >= log_every else (loss_train[-1] if loss_train else 0.0)
+            avg_grad_norm = np.mean(grad_norms[i - log_every:i]) if i >= log_every else (grad_norms[-1] if grad_norms else 0.0)
             elapsed    = time.time() - start
             start      = time.time()
             current_lr = scheduler.get_last_lr()[0] if i > 0 else config['lr']
             pbar.set_postfix(train=f"{avg_train:.4f}", val=f"{val_loss:.4f}")
-            print(f"[{i:06d}]  train_loss={avg_train:.4f}  val_loss={val_loss:.4f}  lr={current_lr:.6f}  ({elapsed:.0f}s)")
+            print(f"[{i:06d}]  train_loss={avg_train:.4f}  val_loss={val_loss:.4f}  lr={current_lr:.6f}  grad_norm={avg_grad_norm:.3f}  ({elapsed:.0f}s)")
 
             if val_loss < best_val_loss:
                 best_val_loss = val_loss
                 torch.save(model.state_dict(), best_path)
+                with open(best_path.replace('.pth', '.json'), 'w') as f:
+                    json.dump(config, f, indent=4)
                 print(f"  → new best {best_val_loss:.4f} → {best_path}")
 
             if i > 0 and i % checkpoint_every == 0:
                 periodic = os.path.join(checkpoint_dir,
-                                        f'proj_softmax_ipool_{run_timestamp}_step_{i:06d}.pth')
+                                        f'full_softmax_4pool_popularity_alpha_{run_timestamp}_step_{i:06d}.pth')
                 torch.save(model.state_dict(), periodic)
+                with open(periodic.replace('.pth', '.json'), 'w') as f:
+                    json.dump(config, f, indent=4)
                 print(f"  → periodic checkpoint → {periodic}")
         else:
             model.train()
-            ix  = torch.randint(0, n_train, (minibatch_size,)).tolist()
-            hp  = pad_history_batch([X_history_train[j] for j in ix], pad_idx)
-            rp  = pad_history_ratings_batch([X_history_ratings_train[j] for j in ix])
-            U   = model.user_embedding(X_genre_train[ix], hp, rp, timestamp_train[ix])
-            V   = model.item_embedding(target_book_idx_train[ix])
-            scores = (U @ V.T) / temperature                                     # (B, B)
-            labels = torch.arange(len(ix))
+            V_all = model.full_item_embedding()
+            ix         = torch.randint(0, n_train, (minibatch_size,))
+            h_full     = X_hist_full_train[ix].to(device)
+            h_liked    = X_hist_liked_train[ix].to(device)
+            h_disliked = X_hist_disliked_train[ix].to(device)
+            h_weighted = X_hist_weighted_train[ix].to(device)
+            r_weighted = X_rats_weighted_train[ix].to(device)
+
+            U = model.user_embedding(X_genre_train[ix], h_full, h_liked, h_disliked,
+                                     h_weighted, r_weighted, timestamp_train[ix])
+
+            scores = (U @ V_all.T) / temperature - popularity_bias
+            labels = target_book_idx_train[ix]
             loss   = F.cross_entropy(scores, labels)
             optimizer.zero_grad()
             loss.backward()
+            grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0).item()
             optimizer.step()
             scheduler.step()
             loss_train.append(loss.item())
+            grad_norms.append(grad_norm)
 
     print(f"\nSoftmax training complete. Best val loss: {best_val_loss:.4f}")
     print(f"Best checkpoint: {best_path}")

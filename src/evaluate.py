@@ -17,6 +17,14 @@ from src.model import BookRecommender
 from src.train import build_model, get_softmax_config, print_model_summary
 
 
+# Canary rating scale mirrors training d_rat = rat - avg_rat for avg_rat=3.0:
+#   5-star → d_rat=+2.0, 4-star → d_rat=+1.0
+CANARY_AVG_RAT             = 3.0
+VALUE_FAVORITE_BOOK_RATING = 2.0   # d_rat for a 5-star book (5 - 3 = +2)
+VALUE_ANCHOR_BOOK_RATING   = 1.0   # d_rat for a 4-star book (4 - 3 = +1)
+ANCHORS_PER_TAG            = 5
+POPULARITY_ALPHA_INFERENCE_MULTIPLE = 2.0  # tuning knob in cosine similarity space
+
 # ── Canary user definitions ───────────────────────────────────────────────────
 
 # Genre names must match base_vocab.parquet exactly.
@@ -24,45 +32,6 @@ from src.train import build_model, get_softmax_config, print_model_summary
 #   fiction, history, historical fiction, biography,
 #   mystery, thriller, crime, non-fiction, poetry, romance, young-adult
 
-USER_TYPE_TO_FAVORITE_GENRES = {
-    "Nick's Recommendations": [''],  # already have extremly rich read history
-    'Mystery Lover':   ['mystery, crime'],
-    'Fantasy Lover':   ['fantasy'],
-    'Romance Lover':   ['romance'],
-    'YA Lover':        ['young-adult'],
-    'History Lover':   ['history, biography'],
-    'Classic Lover':     [],
-    'Horror Lover':       [],  # no horror genre in vocab — relies on shelf tags + books
-    'Sci-Fi Lover':       [],  # no sci-fi genre in vocab — relies on shelf tags + books
-    'NonFiction Lover':   ['non-fiction'],
-    'Economics Lover':  [],
-    'Philosophy & Existentialist Thinker': [],
-    'Graphic Novel/Comic Lover': ['comics, graphic'],
-    'Manga Lover':      [],
-    'Religion Book Reader': [],
-    'Poetry Lover':     ['poetry'],
-    "Children's Book Lover": ['children'],
-}
-
-USER_TYPE_TO_WORST_GENRES = {
-    "Nick's Recommendations": [],
-    'Mystery Lover':     [],
-    'Fantasy Lover':     [],
-    'Romance Lover':     [],
-    'YA Lover':          [],
-    'History Lover':     [],
-    'Classic Lover':    [],
-    'Horror Lover':      [],
-    'Sci-Fi Lover':      [],
-    'NonFiction Lover':  [],
-    'Economics Lover': [],
-    'Philosophy & Existentialist Thinker': [],
-    'Graphic Novel/Comic Lover': [],
-    'Manga Lover':     [],
-    'Religion Book Reader': [],
-    'Poetry Lover':    [],
-    "Children's Book Lover": [],
-}
 
 USER_TYPE_TO_FAVORITE_BOOKS = {
     "Nick's Recommendations": [
@@ -201,12 +170,14 @@ USER_TYPE_TO_FAVORITE_BOOKS = {
         "Maus I: A Survivor's Tale: My Father Bleeds History (Maus, #1)",
     ],
     'Manga Lover': [
-        'Fullmetal Alchemist, Vol. 1 (Fullmetal Alchemist, #1)',
-        'Death Note, Vol. 2: Confluence (Death Note, #2)',
-        'Naruto, Vol. 01: The Tests of the Ninja (Naruto, #1)',
-        'Bleach, Volume 01',
-        'Hunter x Hunter, Vol. 01 (Hunter x Hunter, #1)',
-        'One Piece, Volume 01: Romance Dawn (One Piece, #1)'
+        'One Piece, Volume 08: I Won\'t Die (One Piece, #8)',
+        'Fullmetal Alchemist, Vol. 3 (Fullmetal Alchemist, #3)',
+        'Death Note, Vol. 3: Hard Run (Death Note, #3)',
+        'Soul Eater, Vol. 02 (Soul Eater, #2)',
+        'Fairy Tail, Vol. 1 (Fairy Tail, #1)',
+        'Dragon Ball, Vol. 1: The Monkey King (Dragon Ball, #1)',
+        'Berserk, Vol. 1 (Berserk, #1)',
+        'Death Note, Vol. 11: Kindred Spirits (Death Note, #11)',
     ],
     'Religion Book Reader': [
         'Holy Bible: New International Version',
@@ -359,6 +330,7 @@ USER_TYPE_TO_LIKED_BOOKS = {
     'NonFiction Lover':       [],
     'Economics Lover':        [],
     'Philosophy & Existentialist Thinker': [],
+    'Graphic Novel/Comic Lover': [],
     'Manga Lover':            [],
     'Religion Book Reader':   [],
     'Poetry Lover':           [],
@@ -371,7 +343,7 @@ USER_TYPE_TO_SHELF_TAGS = {
     'Fantasy Lover':   ['epic-fantasy', 'world-building'],
     'Romance Lover':   ['romance', 'love-story', 'chick-lit'],
     'YA Lover':        ['young-adult', 'ya', 'coming-of-age'],
-    'History Lover':   ['history', 'historical'],
+    'History Lover':   ['history'],
     'Classic Lover':   ['classics'],
     'Horror Lover':    ['horror'],
     'Sci-Fi Lover':    ['science-fiction', 'sci-fi'],
@@ -379,17 +351,11 @@ USER_TYPE_TO_SHELF_TAGS = {
     'Economics Lover': ['economics'],
     'Philosophy & Existentialist Thinker': ['philosophy', 'existentialism'],
     'Graphic Novel/Comic Lover': ['graphic-novels', 'comics', 'graphic-novel'],
-    'Manga Lover':     ['shonen'],
+    'Manga Lover':     ['anime', 'mangas'],
     'Religion Book Reader': ['religion'],
     'Poetry Lover':    ['poetry'],
     "Children's Book Lover": ['childrens', 'children-s', 'picture-books'],
 }
-
-VALUE_FAVORITE_GENRE_RATING = 4.0
-VALUE_DISLIKED_GENRE_RATING = -2.0
-VALUE_FAVORITE_BOOK_RATING  = 2.0
-VALUE_ANCHOR_BOOK_RATING    = 1.0
-ANCHORS_PER_TAG             = 5
 
 
 # ── Book embedding cache ──────────────────────────────────────────────────────
@@ -400,9 +366,10 @@ def build_book_embeddings(model: BookRecommender, fs: FeatureStore) -> dict:
     Returns book_id → {'BOOK_EMBEDDING_COMBINED': Tensor, ...}
     """
     model.eval()
+    device = next(model.parameters()).device
     n_books    = len(fs.top_books)
     batch_size = 512
-    all_book_idxs = torch.tensor(list(range(n_books)), dtype=torch.long)
+    all_book_idxs = torch.tensor(list(range(n_books)), dtype=torch.long).to(device)
 
     genre_embs    = []
     shelf_embs    = []
@@ -476,8 +443,6 @@ def _get_anchor_titles(fs: FeatureStore, shelf_tags: list, exclude: set) -> list
 def _build_user_embedding(model: BookRecommender, fs: FeatureStore, user_type: str,
                           ts_inference: torch.Tensor) -> torch.Tensor:
     """Build the combined user embedding for a canary user type. Mirrors forward() logic."""
-    fav_genres   = USER_TYPE_TO_FAVORITE_GENRES[user_type]
-    worst_genres = USER_TYPE_TO_WORST_GENRES[user_type]
     fav_books    = USER_TYPE_TO_FAVORITE_BOOKS[user_type]
     shelf_tags   = USER_TYPE_TO_SHELF_TAGS.get(user_type, [])
 
@@ -519,40 +484,57 @@ def _build_user_embedding(model: BookRecommender, fs: FeatureStore, user_type: s
         if g in fs.genre_to_i:
             ctx[fs.genre_to_i[g]]            = avg_r
             ctx[n_genres + fs.genre_to_i[g]] = frac
-    # Explicit genre overrides
-    for g in fav_genres:
-        if g in fs.genre_to_i:
-            ctx[fs.genre_to_i[g]]            = VALUE_FAVORITE_GENRE_RATING
-            ctx[n_genres + fs.genre_to_i[g]] = 1.0 / max(len(fav_genres), 1)
-    for g in worst_genres:
-        if g in fs.genre_to_i:
-            ctx[fs.genre_to_i[g]] = VALUE_DISLIKED_GENRE_RATING
+    # ── Build partitioned history lists ──────────────────────────────────────
+    # Canary book weights: fav_books=2.0, liked/anchor=1.0 → all positive
+    h_full_idx     = [h[0] for h in history]
+    h_liked_idx    = [h[0] for h in history if h[1] >= 0.5]
+    h_disliked_idx = [h[0] for h in history if h[1] <= -0.5]
+    h_w_idx        = [h[0] for h in history]
+    h_w_rat        = [h[1] for h in history]
 
     # ── Build user embedding via model.user_embedding() ──────────────────────
-    if history:
-        hist_idx_t = torch.tensor([[h[0] for h in history]], dtype=torch.long)  # (1, hist)
-        hist_wts_t = torch.tensor([[h[1] for h in history]], dtype=torch.float)  # (1, hist)
-    else:
-        hist_idx_t = torch.full((1, 1), model.book_pad_idx, dtype=torch.long)
-        hist_wts_t = torch.zeros(1, 1)
+    device = next(model.parameters()).device
 
-    X_inf = torch.tensor([ctx])
-    return model.user_embedding(X_inf, hist_idx_t, hist_wts_t, ts_inference)
+    def to_t(idx_list, dtype=torch.long):
+        if not idx_list:
+            return torch.full((1, 1), model.book_pad_idx, dtype=dtype).to(device)
+        return torch.tensor([idx_list], dtype=dtype).to(device)
+
+    h_full_t     = to_t(h_full_idx)
+    h_liked_t    = to_t(h_liked_idx)
+    h_disliked_t = to_t(h_disliked_idx)
+    h_weighted_t = to_t(h_w_idx)
+    r_weighted_t = to_t(h_w_rat, dtype=torch.float)
+
+    X_inf = torch.tensor([ctx]).to(device)
+    ts_inference = ts_inference.to(device)
+    
+    return model.user_embedding(X_inf, h_full_t, h_liked_t, h_disliked_t, 
+                                h_weighted_t, r_weighted_t, ts_inference)
 
 
 def run_canary_eval(model: BookRecommender, fs: FeatureStore,
                     book_embeddings: dict, all_ids: list, all_embs: torch.Tensor,
+                    popularity_alpha: float = 0.0, temperature: float = None,
                     top_n: int = 10) -> None:
     """Run all canary users and print recommendation tables."""
     model.eval()
+    device = next(model.parameters()).device
 
     ts_max_bin = torch.bucketize(
         torch.tensor([float(fs.timestamp_bins[-1].item())]),
         fs.timestamp_bins, right=False
     )
 
+    # Popularity bias — scaled by temperature to match raw dot-product space (no /temp at inference)
+    pop_bias = None
+    if popularity_alpha > 0 and temperature is not None and len(fs.book_interaction_counts) > 0:
+        counts   = torch.from_numpy(fs.book_interaction_counts).to(device)
+        pop_bias = (temperature * popularity_alpha * POPULARITY_ALPHA_INFERENCE_MULTIPLE
+                    * torch.log1p(counts))  # (n_books,)
+
     with torch.no_grad():
-        for user_type in USER_TYPE_TO_FAVORITE_GENRES:
+        for user_type in USER_TYPE_TO_FAVORITE_BOOKS:
             user_emb    = _build_user_embedding(model, fs, user_type, ts_max_bin)
             fav_books   = USER_TYPE_TO_FAVORITE_BOOKS[user_type]
             liked_books = USER_TYPE_TO_LIKED_BOOKS.get(user_type, [])
@@ -562,25 +544,24 @@ def run_canary_eval(model: BookRecommender, fs: FeatureStore,
             exclude_set   = set(fav_books) | set(liked_books) | set(anchor_titles)
 
             raw_scores = (all_embs @ user_emb.T).squeeze(-1)
-            scores     = {all_ids[i]: raw_scores[i].item() for i in range(len(all_ids))}
+            if pop_bias is not None:
+                raw_scores = raw_scores - pop_bias
+            sorted_idx = torch.argsort(raw_scores, descending=True).tolist()
 
             n = 20 if user_type == "Nick's Recommendations" else top_n
-            recs       = []
+            recs        = []
             seen_titles = set(exclude_set)
-            for bid, _ in sorted(scores.items(), key=lambda x: x[1], reverse=True):
+            for idx in sorted_idx:
                 if len(recs) >= n:
                     break
-                title = fs.bookId_to_title[bid]
+                title = fs.bookId_to_title[all_ids[idx]]
                 if title not in seen_titles:
                     seen_titles.add(title)
                     recs.append(title)
 
-            fav_genres      = ', '.join(USER_TYPE_TO_FAVORITE_GENRES[user_type]) or '—'
-            disliked_genres = ', '.join(USER_TYPE_TO_WORST_GENRES[user_type])    or '—'
-
             col_w      = min(50, max((len(t) for t in fav_books), default=20))
             rec_w      = min(50, max((len(r) for r in recs), default=20))
-            title_line = f"{user_type}  |  Likes: {fav_genres}  |  Dislikes: {disliked_genres}"
+            title_line = user_type
             if shelf_tags:
                 title_line += f"  |  Shelves: {', '.join(shelf_tags[:4])}"
             bar_w      = max(col_w + rec_w + 4, len(title_line))
@@ -603,7 +584,8 @@ def run_canary_eval(model: BookRecommender, fs: FeatureStore,
 # ── Embedding probes ──────────────────────────────────────────────────────────
 
 def probe_genre(model: BookRecommender, genre, book_embeddings: dict,
-                fs: FeatureStore, top_n: int = 10) -> None:
+                fs: FeatureStore, all_ids: list, all_norm_genre: torch.Tensor,
+                top_n: int = 10) -> None:
     """
     Find the most representative books for a genre in item genre embedding space.
     Passes a one-hot (or multi-hot) genre vector through item_genre_tower, compares via cosine similarity.
@@ -619,75 +601,65 @@ def probe_genre(model: BookRecommender, genre, book_embeddings: dict,
     for g in genres:
         ctx[fs.genre_to_i[g]] = 1.0
 
+    device = next(model.parameters()).device
     with torch.no_grad():
-        query_emb = model.item_genre_tower(torch.tensor([ctx])).view(-1)
-
-    sims = {
-        bid: F.cosine_similarity(
-            query_emb.unsqueeze(0),
-            book_embeddings[bid]['BOOK_GENRE_EMBEDDING'].view(-1).unsqueeze(0)
-        ).item()
-        for bid in fs.top_books
-    }
+        query_emb  = model.item_genre_tower(torch.tensor([ctx]).to(device)).view(-1)
+        query_norm = F.normalize(query_emb.unsqueeze(0), dim=1)
+        scores     = (all_norm_genre @ query_norm.T).squeeze(-1)
+        top_idx    = scores.argsort(descending=True).tolist()
 
     label = ' + '.join(genres)
     print(f"\nTop-{top_n} books for genre '{label}':")
     seen = set()
-    for bid, sim in sorted(sims.items(), key=lambda x: x[1], reverse=True):
+    for idx in top_idx:
         if len(seen) >= top_n:
             break
+        bid   = all_ids[idx]
         title = fs.bookId_to_title[bid]
         if title not in seen:
             seen.add(title)
-            book_genres = ', '.join(fs.bookId_to_genres.get(bid, []))
-            print(f"  {sim:.4f}  {title}  [{book_genres}]")
+            print(f"  {scores[idx].item():.4f}  {title}")
 
 
-def probe_shelf(model: BookRecommender, shelf_tags: list, book_embeddings: dict,
-                fs: FeatureStore, top_n: int = 10, k_anchors: int = 5) -> None:
+def probe_shelf(shelf_tags: list, book_embeddings: dict,
+                fs: FeatureStore, all_ids: list, all_norm_shelf: torch.Tensor,
+                top_n: int = 10, k_anchors: int = 5) -> None:
     """
     Find books most similar to a shelf tag query in the item shelf embedding space.
     Finds the top-k_anchors books by raw shelf score, averages their BOOK_SHELF_EMBEDDING
     as the query, then compares via cosine similarity against all books.
     """
-    raw_scores = {}
     valid_tags = [t for t in shelf_tags if t in fs.shelf_to_i]
     if not valid_tags:
         print(f"No shelf tags from {shelf_tags} found in vocabulary.")
         return
 
-    for bid in fs.top_books:
-        shelf_ctx  = fs.bookId_to_shelf_context[bid]
-        raw_scores[bid] = sum(shelf_ctx[fs.shelf_to_i[t]] for t in valid_tags)
-
+    raw_scores = {
+        bid: sum(fs.bookId_to_shelf_context[bid][fs.shelf_to_i[t]] for t in valid_tags)
+        for bid in fs.top_books
+    }
     anchors   = sorted(raw_scores, key=raw_scores.get, reverse=True)[:k_anchors]
     query_emb = torch.stack([
         book_embeddings[bid]['BOOK_SHELF_EMBEDDING'].view(-1) for bid in anchors
     ]).mean(dim=0)
+    query_norm = F.normalize(query_emb.unsqueeze(0), dim=1)
+    scores     = (all_norm_shelf @ query_norm.T).squeeze(-1)
+    top_idx    = scores.argsort(descending=True).tolist()
 
+    anchor_set    = set(anchors)
     anchor_titles = [fs.bookId_to_title[bid] for bid in anchors]
     print(f"\nShelf anchors for {shelf_tags}: {anchor_titles}")
-
-    sims = {
-        bid: F.cosine_similarity(
-            query_emb.unsqueeze(0),
-            book_embeddings[bid]['BOOK_SHELF_EMBEDDING'].view(-1).unsqueeze(0)
-        ).item()
-        for bid in fs.top_books
-    }
-
-    anchor_set  = set(anchors)
-    seen_titles = set()
     print(f"Top-{top_n} books:")
-    for bid, sim in sorted(sims.items(), key=lambda x: x[1], reverse=True):
+    seen_titles = set()
+    for idx in top_idx:
         if len(seen_titles) >= top_n:
             break
+        bid   = all_ids[idx]
         title = fs.bookId_to_title[bid]
         if title not in seen_titles:
             seen_titles.add(title)
-            marker = " [seed]" if bid in anchor_set else ""
-            book_genres = ', '.join(fs.bookId_to_genres.get(bid, []))
-            print(f"  {sim:.4f}  {title}{marker}  [{book_genres}]")
+            marker      = " [seed]" if bid in anchor_set else ""
+            print(f"  {scores[idx].item():.4f}  {title}{marker}")
 
 
 def probe_similar(book_embeddings: dict, fs: FeatureStore,
@@ -710,12 +682,11 @@ def probe_similar(book_embeddings: dict, fs: FeatureStore,
         if bid is None:
             return []
         query   = F.normalize(book_embeddings[bid][emb_key], dim=1)
-        sims    = (norm_matrix @ query.T).squeeze(-1)
-        top_idx = sims.argsort(descending=True)
+        top_idx = (norm_matrix @ query.T).squeeze(-1).argsort(descending=True).tolist()
         results = []
         seen_titles = {title}
         for idx in top_idx:
-            candidate_title = fs.bookId_to_title[all_ids[idx.item()]]
+            candidate_title = fs.bookId_to_title[all_ids[idx]]
             if candidate_title in seen_titles:
                 continue
             seen_titles.add(candidate_title)
@@ -758,8 +729,10 @@ def _resolve_checkpoint(checkpoint_path: str, checkpoint_dir: str):
     if checkpoint_path is not None:
         return checkpoint_path
     candidates = sorted(
-        glob.glob(os.path.join(checkpoint_dir, 'best_proj_softmax_ipool_*.pth')) +
-        glob.glob(os.path.join(checkpoint_dir, 'proj_softmax_ipool_*.pth')),
+        glob.glob(os.path.join(checkpoint_dir, 'best_full_softmax_4pool_popularity_alpha_*.pth')) +
+        glob.glob(os.path.join(checkpoint_dir, 'full_softmax_4pool_popularity_alpha_*_step_*.pth')) +
+        glob.glob(os.path.join(checkpoint_dir, 'best_softmax_4pool_*.pth')) +
+        glob.glob(os.path.join(checkpoint_dir, 'softmax_4pool_*.pth')),
         key=os.path.getmtime, reverse=True
     )
     if not candidates:
@@ -768,43 +741,69 @@ def _resolve_checkpoint(checkpoint_path: str, checkpoint_dir: str):
     return candidates[0]
 
 
+def get_device():
+    if torch.backends.mps.is_available():
+        return torch.device("mps")
+    elif torch.cuda.is_available():
+        return torch.device("cuda")
+    else:
+        return torch.device("cpu")
+
+
 def _load_model_and_embeddings(checkpoint_path: str, fs):
     """Build model, load weights, pre-compute book embeddings."""
-    config = get_softmax_config()
+    device = get_device()
+    config_path = checkpoint_path.replace('.pth', '.json')
+    if os.path.exists(config_path):
+        import json
+        with open(config_path, 'r') as f:
+            config = json.load(f)
+        print(f"Loading config from: {config_path}")
+    else:
+        config = get_softmax_config()
+        print(f"Config sidecar not found, using defaults from get_softmax_config()")
+
     print(f"Loading checkpoint: {checkpoint_path}")
-    state_dict = torch.load(checkpoint_path, weights_only=True)
+    state_dict = torch.load(checkpoint_path, weights_only=True, map_location=device)
     model = build_model(config, fs)
+    model.to(device)
     model.load_state_dict(state_dict)
     model.eval()
     print_model_summary(model)
 
-    print("\nBuilding book embeddings ...")
+    print(f"\nBuilding book embeddings on {device} ...")
     book_embeddings = build_book_embeddings(model, fs)
 
-    print("Precomputing embedding matrix ...")
-    all_ids       = list(book_embeddings.keys())
-    all_embs      = torch.cat([book_embeddings[bid]['BOOK_EMBEDDING_COMBINED'] for bid in all_ids], dim=0)
-    all_norm      = F.normalize(all_embs, dim=1)
-    all_id_embs   = torch.cat([book_embeddings[bid]['BOOK_ID_EMBEDDING']       for bid in all_ids], dim=0)
-    all_norm_id   = F.normalize(all_id_embs, dim=1)
-    all_shelf_embs = torch.cat([book_embeddings[bid]['BOOK_SHELF_EMBEDDING']   for bid in all_ids], dim=0)
+    print("Precomputing embedding matrices ...")
+    all_ids        = list(book_embeddings.keys())
+    all_embs       = torch.cat([book_embeddings[bid]['BOOK_EMBEDDING_COMBINED'] for bid in all_ids], dim=0)
+    all_norm       = F.normalize(all_embs, dim=1)
+    all_id_embs    = torch.cat([book_embeddings[bid]['BOOK_ID_EMBEDDING']       for bid in all_ids], dim=0)
+    all_norm_id    = F.normalize(all_id_embs, dim=1)
+    all_shelf_embs = torch.cat([book_embeddings[bid]['BOOK_SHELF_EMBEDDING']    for bid in all_ids], dim=0)
     all_norm_shelf = F.normalize(all_shelf_embs, dim=1)
-    return model, book_embeddings, all_ids, all_embs, all_norm, all_norm_id, all_norm_shelf
+    all_genre_embs = torch.cat([book_embeddings[bid]['BOOK_GENRE_EMBEDDING']    for bid in all_ids], dim=0)
+    all_norm_genre = F.normalize(all_genre_embs, dim=1)
+    return model, config, book_embeddings, all_ids, all_embs, all_norm, all_norm_id, all_norm_shelf, all_norm_genre
 
 
 # ── Orchestrators ─────────────────────────────────────────────────────────────
 
 def run_canary(data_dir: str = 'data', checkpoint_path: str = None,
                version: str = 'v1') -> None:
-    from src.dataset import load_features
+    from src.dataset import load_book_features
     cp = _resolve_checkpoint(checkpoint_path, 'saved_models')
     if cp is None:
         return
-    print("Loading features ...")
-    fs = load_features(data_dir, version)
-    model, book_embeddings, all_ids, all_embs, all_norm, all_norm_id, all_norm_shelf = _load_model_and_embeddings(cp, fs)
+    print("Loading book features ...")
+    fs = load_book_features(data_dir, version)
+    model, cp_config, book_embeddings, all_ids, all_embs, all_norm, all_norm_id, all_norm_shelf, all_norm_genre = _load_model_and_embeddings(cp, fs)
+    alpha = cp_config.get('popularity_alpha', 0.0)
+    temperature = cp_config.get('temperature', 0.5 / cp_config.get('minibatch_size', 512))
+    print(f"  popularity_alpha={alpha} ({'applied' if alpha > 0 else 'disabled'})  temperature={temperature:.6f}")
     print("\n── Canary user evaluation ──")
-    run_canary_eval(model, fs, book_embeddings, all_ids, all_embs)
+    run_canary_eval(model, fs, book_embeddings, all_ids, all_embs,
+                    popularity_alpha=alpha, temperature=temperature)
 
 
 PROBE_SIMILAR_TITLES = [
@@ -817,6 +816,8 @@ PROBE_SIMILAR_TITLES = [
     'Sapiens: A Brief History of Humankind',
     'It',
     "Ender's Game (Ender's Saga, #1)",
+    'Fullmetal Alchemist, Vol. 9 (Fullmetal Alchemist, #9)',
+    'Thinner'
 ]
 
 
@@ -828,13 +829,14 @@ def run_probes(data_dir: str = 'data', checkpoint_path: str = None,
         return
     print("Loading book features ...")
     fs = load_book_features(data_dir, version)
-    model, book_embeddings, all_ids, all_embs, all_norm, all_norm_id, all_norm_shelf = _load_model_and_embeddings(cp, fs)
+    model, cp_config, book_embeddings, all_ids, all_embs, all_norm, all_norm_id, all_norm_shelf, all_norm_genre = _load_model_and_embeddings(cp, fs)
     print("\n── Embedding probes ──")
-    probe_genre(model, 'mystery, thriller, crime', book_embeddings, fs)
-    probe_genre(model, 'fantasy, paranormal',      book_embeddings, fs)
-    probe_genre(model, ['romance', 'young-adult'],  book_embeddings, fs)
-    probe_shelf(model, ['horror', 'scary', 'dark'],          book_embeddings, fs)
-    probe_shelf(model, ['science-fiction', 'sci-fi', 'space'], book_embeddings, fs)
-    probe_shelf(model, ['epic-fantasy', 'magic', 'world-building'], book_embeddings, fs)
+    probe_genre(model, 'mystery, thriller, crime', book_embeddings, fs, all_ids, all_norm_genre)
+    probe_genre(model, 'fantasy, paranormal',      book_embeddings, fs, all_ids, all_norm_genre)
+    probe_genre(model, ['romance', 'young-adult'],  book_embeddings, fs, all_ids, all_norm_genre)
+    probe_shelf(['horror', 'scary', 'dark'],          book_embeddings, fs, all_ids, all_norm_shelf)
+    probe_shelf(['science-fiction', 'sci-fi', 'space'], book_embeddings, fs, all_ids, all_norm_shelf)
+    probe_shelf(['epic-fantasy', 'magic', 'world-building'], book_embeddings, fs, all_ids, all_norm_shelf)
+    probe_shelf(['manga', 'mangá', 'mangas', 'anime'], book_embeddings, fs, all_ids, all_norm_shelf)
     probe_similar(book_embeddings, fs, all_ids, all_norm, PROBE_SIMILAR_TITLES,
                   all_norm_id=all_norm_id, all_norm_shelf=all_norm_shelf)

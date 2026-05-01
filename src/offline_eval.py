@@ -1,26 +1,26 @@
 """
 Offline retrieval evaluation — Recall@K, NDCG@K, Hit Rate@K, MRR.
 
-Protocol: leave-label-out per user.
-  Context = user_to_read_history (90% of reads, pre-mapped book indices)
-  Targets = user_to_book_to_rating_LABEL (remaining 10% of reads)
+Protocol: rollback examples from val users (same as training).
+For each val user, rollback examples are generated (context = all reads before
+position i, target = read at position i). Metrics are per-example (single target).
 
-No new splits needed — reuses the existing 90/10 split from preprocess.py.
-Eval is restricted to the validation user set (last 10% of the shuffle used
-in make_softmax_splits, seed=42, pct_train=0.9) to avoid evaluating on
-users seen during training.
+Val users are fixed in features.py (VAL_FRACTION=0.10, VAL_SPLIT_SEED=42).
+No new splits needed — reuses fs.val_users directly.
 
 Usage:
     python main.py eval
     python main.py eval <checkpoint_path>
 """
 import math
+import os
 import random
 
+import pandas as pd
 import torch
-import torch.nn.functional as F
+from tqdm import tqdm
 
-from src.dataset import FeatureStore
+from src.dataset import FeatureStore, build_softmax_dataset, MAX_ROLLBACK_EXAMPLES_PER_USER
 from src.evaluate import build_book_embeddings
 from src.model import BookRecommender
 
@@ -29,123 +29,128 @@ def run_offline_eval(model: BookRecommender, fs: FeatureStore,
                      checkpoint_path: str = '',
                      n_users: int = 5_000,
                      ks: tuple = (1, 5, 10, 20, 50),
-                     dataset_seed: int = 42,
-                     dataset_pct_train: float = 0.9) -> None:
+                     seed: int = 42,
+                     data_dir: str = 'data') -> None:
+    device = next(model.parameters()).device
     model.eval()
 
-    # ── Pre-compute item embedding matrix ────────────────────────────────────
-    print("Building book embeddings ...")
+    # ── Pre-compute item embedding matrix ─────────────────────────────────────
+    print(f"Building book embeddings on {device} ...")
     book_embeddings = build_book_embeddings(model, fs)
     all_ids  = list(book_embeddings.keys())
     all_embs = torch.cat(
         [book_embeddings[bid]['BOOK_EMBEDDING_COMBINED'] for bid in all_ids], dim=0
-    )  # (n_books, 100)
-    bid_to_pos = {bid: i for i, bid in enumerate(all_ids)}
+    ).to(device)  # (n_books, output_dim)
 
-    # ── Derive val users: replicate the same shuffle+split used in make_softmax_splits ──
-    # This ensures eval only covers users not seen during training.
-    all_users = fs.user_ids[:]
-    rng_split = random.Random(dataset_seed)
-    rng_split.shuffle(all_users)
-    split     = int(len(all_users) * dataset_pct_train)
-    val_users_full = all_users[split:]
+    # ── Sample val users ──────────────────────────────────────────────────────
+    val_users = fs.val_users[:]
+    rng = random.Random(seed)
+    eval_users = rng.sample(val_users, min(n_users, len(val_users)))
+    print(f"Evaluating on {len(eval_users):,} val users ...")
 
-    eligible = [u for u in val_users_full
-                if fs.user_to_read_history.get(u)
-                and fs.user_to_book_to_rating_LABEL.get(u)]
+    # ── Build rollback examples ───────────────────────────────────────────────
+    print("Loading interactions ...")
+    raw_df = pd.read_parquet(os.path.join(data_dir, 'base_interactions_raw.parquet'))
 
-    rng = random.Random(dataset_seed)
-    eval_users = rng.sample(eligible, min(n_users, len(eligible)))
-
-    # ── Timestamp: use max bin (same as canary) ───────────────────────────────
-    ts_max_bin = torch.bucketize(
-        torch.tensor([float(fs.timestamp_bins[-1].item())]),
-        fs.timestamp_bins, right=False,
+    print("Building rollback examples for val users ...")
+    (X_genre, X_hist_full, X_hist_liked, X_hist_disliked,
+     X_hist_weighted, X_rats_weighted, timestamp, target_book_idx) = build_softmax_dataset(
+        eval_users, fs, raw_df,
+        max_per_user=MAX_ROLLBACK_EXAMPLES_PER_USER,
+        seed=seed + 1,
     )
 
-    # ── Accumulators ─────────────────────────────────────────────────────────
+    n_examples = target_book_idx.shape[0]
+    print(f"  {n_examples:,} rollback examples")
+
+    # ── Score in batches ──────────────────────────────────────────────────────
     recall   = {k: 0.0 for k in ks}
     hit_rate = {k: 0   for k in ks}
     ndcg     = {k: 0.0 for k in ks}
     mrr_sum  = 0.0
     n_eval   = 0
 
+    batch_size = 512
+
     with torch.no_grad():
-        for user in eval_users:
-            hist_indices = fs.user_to_read_history[user]          # list[int]
-            hist_ratings = fs.user_to_read_history_ratings[user]  # list[float], debiased
+        for s in tqdm(range(0, n_examples, batch_size), desc="Scoring"):
+            e = min(s + batch_size, n_examples)
 
-            if not hist_indices:
-                continue
+            h_full     = X_hist_full[s:e].to(device)
+            h_liked    = X_hist_liked[s:e].to(device)
+            h_disliked = X_hist_disliked[s:e].to(device)
+            h_weighted = X_hist_weighted[s:e].to(device)
+            r_weighted = X_rats_weighted[s:e].to(device)
+            x_genre    = X_genre[s:e].to(device)
+            ts         = timestamp[s:e].to(device)
 
-            target_bids = [b for b in fs.user_to_book_to_rating_LABEL[user]
-                           if b in bid_to_pos]
-            if not target_bids:
-                continue
+            user_emb = model.user_embedding(
+                x_genre, h_full, h_liked, h_disliked, h_weighted, r_weighted, ts)
+            scores = user_emb @ all_embs.T  # (B, n_books)
 
-            # ── Build user embedding ──────────────────────────────────────────
-            hist_idx_t  = torch.tensor(hist_indices, dtype=torch.long).unsqueeze(0)  # (1, hist)
-            hist_wts_t  = torch.tensor([hist_ratings], dtype=torch.float)             # (1, hist)
-            genre_ctx_t = torch.tensor([fs.user_to_genre_context[user]])
-            user_emb    = model.user_embedding(genre_ctx_t, hist_idx_t, hist_wts_t, ts_max_bin)
+            target_idxs = target_book_idx[s:e]  # (B,)
 
-            # ── Score all books ───────────────────────────────────────────────
-            scores = (all_embs @ user_emb.T).squeeze(-1)  # (n_books,)
+            for i in range(e - s):
+                t_pos        = target_idxs[i].item()
+                target_score = scores[i, t_pos]
+                rank         = int((scores[i] > target_score).sum().item()) + 1
 
-            # ── Metrics ───────────────────────────────────────────────────────
-            n_targets = len(target_bids)
-            target_positions = [bid_to_pos[b] for b in target_bids]
-            target_scores    = scores[target_positions]
-
-            # Rank of each target: number of ALL books scoring higher + 1
-            # Use broadcasting: (n_books,) vs (n_targets,) → (n_targets,)
-            ranks = (scores.unsqueeze(1) > target_scores.unsqueeze(0)).sum(dim=0) + 1
-            # ranks: (n_targets,) 1-indexed
-
-            # MRR — best rank among targets
-            best_rank = ranks.min().item()
-            mrr_sum  += 1.0 / best_rank
-
-            for k in ks:
-                hits_k = (ranks <= k).sum().item()
-                recall[k]   += hits_k / n_targets
-                hit_rate[k] += int(hits_k > 0)
-                # NDCG: sum of 1/log2(rank+1) for hits in top-K, normalised by ideal
-                dcg   = sum(1.0 / math.log2(r + 1) for r in ranks.tolist() if r <= k)
-                ideal = sum(1.0 / math.log2(i + 2) for i in range(min(n_targets, k)))
-                ndcg[k] += dcg / ideal if ideal > 0 else 0.0
-
-            n_eval += 1
+                mrr_sum += 1.0 / rank
+                for k in ks:
+                    if rank <= k:
+                        recall[k]   += 1.0
+                        hit_rate[k] += 1
+                        ndcg[k]     += 1.0 / math.log2(rank + 1)
+                n_eval += 1
 
     if n_eval == 0:
-        print("No users evaluated — check that features parquets are loaded.")
+        print("No examples evaluated.")
         return
 
     # ── Print results ─────────────────────────────────────────────────────────
-    # Correct random Hit Rate@K: P(at least 1 of K random items is a target)
-    # = 1 - (1 - avg_labels/corpus)^K, where avg_labels accounts for multi-label users.
-    n_corpus   = len(all_ids)
-    avg_labels = sum(
-        len([b for b in fs.user_to_book_to_rating_LABEL[u] if b in bid_to_pos])
-        for u in eval_users
-    ) / max(n_eval, 1)
+    n_corpus  = len(all_ids)
+    rand_mrr  = sum(1.0 / r for r in range(1, n_corpus + 1)) / n_corpus
 
-    print(f"\n── Offline Evaluation  (n={n_eval:,} val users, leave-label-out) "
-          + "─" * 20)
+    print(f"\n── Offline Evaluation  ({n_eval:,} rollback examples, "
+          f"{len(eval_users):,} val users) " + "─" * 20)
     if checkpoint_path:
         print(f"Checkpoint: {checkpoint_path}")
-    print(f"Corpus: {n_corpus:,} books  |  Avg label books/user: {avg_labels:.1f}")
-    print(f"Random Hit Rate baselines: " + "  ".join(
-        f"@{k}: {1 - (1 - avg_labels/n_corpus)**k:.3%}" for k in ks
-    ) + "\n")
+    print(f"Corpus: {n_corpus:,} books\n")
 
     header = f"{'K':>6}  {'Recall@K':>10}  {'Hit Rate@K':>11}  {'NDCG@K':>8}"
+    sep    = "─" * len(header)
     print(header)
-    print("─" * len(header))
+    print(sep)
+    for k in ks:
+        rand_recall_k = k / n_corpus
+        print(f"{k:>6}  {rand_recall_k:>10.4f}  {rand_recall_k:>11.4f}  "
+              f"{sum(1.0/math.log2(r+1) for r in range(1,k+1))/n_corpus:>8.4f}  ← random")
+    print("·" * len(header))
     for k in ks:
         print(f"{k:>6}  "
               f"{recall[k]/n_eval:>10.4f}  "
               f"{hit_rate[k]/n_eval:>11.4f}  "
-              f"{ndcg[k]/n_eval:>8.4f}")
-    print("─" * len(header))
-    print(f"MRR: {mrr_sum/n_eval:.4f}")
+              f"{ndcg[k]/n_eval:>8.4f}  ← model")
+    print(sep)
+    print(f"MRR  random: {rand_mrr:.4f}   model: {mrr_sum/n_eval:.4f}  "
+          f"(+{mrr_sum/n_eval - rand_mrr:.4f})")
+
+    os.makedirs('eval_results', exist_ok=True)
+    stem = os.path.splitext(os.path.basename(checkpoint_path))[0] if checkpoint_path else 'unknown'
+    out_path = os.path.join('eval_results', f'{stem}.txt')
+    lines = [
+        f"── Offline Evaluation  ({n_eval:,} rollback examples, {len(eval_users):,} val users) ──",
+        f"Checkpoint: {checkpoint_path}",
+        f"Corpus: {n_corpus:,} books",
+        "",
+        header,
+        sep,
+    ]
+    for k in ks:
+        lines.append(f"{k:>6}  {recall[k]/n_eval:>10.4f}  "
+                     f"{hit_rate[k]/n_eval:>11.4f}  {ndcg[k]/n_eval:>8.4f}")
+    lines.append(sep)
+    lines.append(f"MRR: {mrr_sum/n_eval:.4f}")
+    with open(out_path, 'w') as f:
+        f.write("\n".join(lines) + "\n")
+    print(f"\n✓ Saved → {out_path}")

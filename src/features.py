@@ -7,6 +7,7 @@ Usage:
     python main.py features
 """
 import os
+import random
 
 import numpy as np
 import pandas as pd
@@ -16,19 +17,19 @@ from tqdm import tqdm
 
 
 FEATURES_VERSION = 'v1'
-MAX_HISTORY_LEN  = 50   # cap read history to most recent N books
+VAL_FRACTION     = 0.10   # fraction of users held out for val
+VAL_SPLIT_SEED   = 42
 
 
 # ── Loaders ───────────────────────────────────────────────────────────────────
 
 def load_base(data_dir: str) -> dict:
     files = [
-        ('books',        'base_books.parquet'),
-        ('vocab',        'base_vocab.parquet'),
-        ('read',         'base_ratings_read.parquet'),
-        ('labels',       'base_ratings_labels.parquet'),
-        ('timestamps',   'base_timestamps.parquet'),
-        ('book_shelves', 'base_book_shelves.parquet'),
+        ('books',         'base_books.parquet'),
+        ('vocab',         'base_vocab.parquet'),
+        ('interactions',  'base_interactions_raw.parquet'),
+        ('timestamps',    'base_timestamps.parquet'),
+        ('book_shelves',  'base_book_shelves.parquet'),
     ]
     result = {}
     for key, filename in files:
@@ -61,14 +62,19 @@ def parse_vocab(vocab_df: pd.DataFrame) -> dict:
 def build_book_features(base: dict, vocab: dict) -> pd.DataFrame:
     """
     Returns DataFrame with one row per book:
-      book_id, book_idx, year, genre_context, shelf_context, author_indices
+      book_id, book_idx, year, genre_context, shelf_context, author_indices,
+      interaction_count
 
-    genre_context  — float vector length n_genres, rank-based normalized weights
-    shelf_context  — float vector length n_shelves, TF-IDF shelf scores (count/total * log(N/df))
-    author_idx     — int, primary author vocab index; 0 (__unknown__) if no authors
+    genre_context      — float vector length n_genres, rank-based normalized weights
+    shelf_context      — float vector length n_shelves, TF-IDF shelf scores
+    author_idx         — int, primary author vocab index; 0 (__unknown__) if no authors
+    interaction_count  — int, number of corpus interactions for this book (for popularity debiasing)
     """
     books_df        = base['books']
     book_shelves_df = base['book_shelves']
+
+    # Per-book interaction count across all corpus users
+    interaction_counts = base['interactions'].groupby('book_id').size().to_dict()
 
     genre_to_i  = vocab['genre_to_i']
     shelf_to_i  = vocab['shelf_to_i']
@@ -112,12 +118,13 @@ def build_book_features(base: dict, vocab: dict) -> pd.DataFrame:
         author_idx = author_to_i.get(str(raw_ids[0]), 0) if raw_ids else 0
 
         rows.append({
-            'book_id':       bid,
-            'book_idx':      book_to_idx[bid],
-            'year':          year,
-            'genre_context': genre_ctx,
-            'shelf_context': book_shelf_ctx.get(bid, [0.0] * n_shelves),
-            'author_idx':    author_idx,
+            'book_id':          bid,
+            'book_idx':         book_to_idx[bid],
+            'year':             year,
+            'genre_context':    genre_ctx,
+            'shelf_context':    book_shelf_ctx.get(bid, [0.0] * n_shelves),
+            'author_idx':       author_idx,
+            'interaction_count': float(interaction_counts.get(bid, 0)),
         })
 
     df = pd.DataFrame(rows)
@@ -130,125 +137,36 @@ def build_book_features(base: dict, vocab: dict) -> pd.DataFrame:
 def build_user_features(base: dict, vocab: dict) -> pd.DataFrame:
     """
     Returns DataFrame with one row per user:
-      user_id, avg_rating, genre_context,
-      read_history, read_history_ratings,
-      label_bookIds, label_ratings, label_timestamps
+      user_id, split, avg_rating
 
-    genre_context — float vector length 2*n_genres:
-                    first half  = debiased avg rating per genre
-                    second half = fraction of read history in each genre
-    read_history  — list[int] of book_idx values, capped to MAX_HISTORY_LEN most recent
+    split      — 'train' or 'val' (user-level 90/10, seed=VAL_SPLIT_SEED)
+    avg_rating — mean raw rating across all of the user's interactions
 
-    Note: shelf_context is NOT stored per user. The model looks up shelf vectors
-    from a book_shelf_matrix using read_history indices and pools them in the
-    forward pass — avoids materializing a 525k × 3032 tensor.
+    Genre context, read history, and rollback slices are computed on-the-fly
+    in dataset.build_softmax_dataset() from base_interactions_raw.parquet.
     """
-    read_df   = base['read']
-    labels_df = base['labels']
-    books_df  = base['books']
+    interactions_df = base['interactions']
 
-    genre_to_i = vocab['genre_to_i']
-    genres_ord = vocab['genres_ordered']
-    n_genres   = len(genre_to_i)
+    all_users = interactions_df['user_id'].unique().tolist()
+    rng = random.Random(VAL_SPLIT_SEED)
+    rng.shuffle(all_users)
+    n_val    = int(len(all_users) * VAL_FRACTION)
+    val_set  = set(all_users[:n_val])
+    print(f"  Train users: {len(all_users) - n_val:,}   Val users: {n_val:,}")
 
-    top_books   = books_df['book_id'].tolist()
-    book_to_idx = {bid: i for i, bid in enumerate(top_books)}
-
-    bookId_to_genres = {r['book_id']: (list(r['genres']) if r['genres'] is not None else []) for _, r in books_df.iterrows()}
-
-    # Per-user avg rating
-    avg_ratings = read_df.groupby('user_id')['rating'].mean().to_dict()
-
-    # Per-user genre stats — vectorized via explode + groupby
-    print("  Computing user genre stats ...")
-    _wg = read_df[['user_id', 'book_id', 'rating']].copy()
-    _wg['genre'] = _wg['book_id'].map(bookId_to_genres)
-    _wg = _wg.explode('genre').dropna(subset=['genre'])
-    _agg = (_wg.groupby(['user_id', 'genre'])
-               .agg(N=('rating', 'count'), S=('rating', 'sum'))
-               .reset_index())
-
-    avg_idx   = {g: i            for i, g in enumerate(genres_ord)}
-    genre_frac_idx = {g: n_genres + i for i, g in enumerate(genres_ord)}
-
-    print("  Building genre context matrix ...")
-    total_N    = _agg.groupby('user_id')['N'].sum()
-    all_uids   = list(total_N.index)
-    uid_to_row = {uid: i for i, uid in enumerate(all_uids)}
-
-    _ctx = _agg.copy()
-    _ctx['total_N']   = _ctx['user_id'].map(total_N)
-    _ctx['avg_rat']   = _ctx['user_id'].map(avg_ratings)
-    _ctx['avg_g']     = _ctx['S'] / _ctx['N']
-    _ctx['val_avg']   = _ctx['avg_g'] - _ctx['avg_rat']
-    _ctx['val_genre_frac'] = _ctx['N'] / _ctx['total_N']
-    _ctx['col_avg']   = _ctx['genre'].map(avg_idx)
-    _ctx['col_genre_frac'] = _ctx['genre'].map(genre_frac_idx)
-    _ctx = _ctx.dropna(subset=['col_avg'])
-    _ctx['col_avg']   = _ctx['col_avg'].astype(int)
-    _ctx['col_genre_frac'] = _ctx['col_genre_frac'].astype(int)
-    _ctx['row']       = _ctx['user_id'].map(uid_to_row).astype(int)
-
-    genre_ctx_matrix = np.zeros((len(all_uids), 2 * n_genres), dtype=np.float32)
-    genre_ctx_matrix[_ctx['row'].values, _ctx['col_avg'].values]   = _ctx['val_avg'].values
-    genre_ctx_matrix[_ctx['row'].values, _ctx['col_genre_frac'].values] = _ctx['val_genre_frac'].values
-
-    # Aggregate read/label history per user
-    read_agg = (read_df
-                 .groupby('user_id')
-                 .agg(book_ids=('book_id', list), ratings=('rating', list))
-                 .reset_index())
-    label_agg = (labels_df
-                 .groupby('user_id')
-                 .agg(book_ids=('book_id', list), ratings=('rating', list),
-                      timestamps=('timestamp', list))
-                 .reset_index())
-
-    read_by_user = {r['user_id']: r for _, r in read_agg.iterrows()}
-    label_by_user = {r['user_id']: r for _, r in label_agg.iterrows()}
+    avg_ratings = interactions_df.groupby('user_id')['rating'].mean().to_dict()
 
     rows = []
-    for uid in tqdm(all_uids, desc="User features"):
-        avg_rat = float(avg_ratings.get(uid, 3.0))
-
-        # Genre context — O(1) lookup from precomputed matrix
-        genre_ctx = genre_ctx_matrix[uid_to_row[uid]].tolist()
-
-        # Read history → book_idx + debiased ratings, cap to MAX_HISTORY_LEN most recent
-        rrow = read_by_user.get(uid)
-        if rrow is not None:
-            pairs = [
-                (book_to_idx[bid], float(rat) - avg_rat)
-                for bid, rat in zip(rrow['book_ids'], rrow['ratings'])
-                if bid in book_to_idx
-            ][-MAX_HISTORY_LEN:]
-        else:
-            pairs = []
-        hist_ids     = [p[0] for p in pairs]
-        hist_ratings = [p[1] for p in pairs]
-
-        # Labels
-        lrow = label_by_user.get(uid)
-        if lrow is not None:
-            lbl_books = list(lrow['book_ids'])
-            lbl_rats  = [float(r) for r in lrow['ratings']]
-            lbl_times = [int(t)   for t in lrow['timestamps']]
-        else:
-            lbl_books = lbl_rats = lbl_times = []
-
+    for uid in tqdm(all_users, desc="User features"):
         rows.append({
-            'user_id':               uid,
-            'avg_rating':            avg_rat,
-            'genre_context':         genre_ctx,
-            'read_history':          hist_ids,
-            'read_history_ratings':  hist_ratings,
-            'label_bookIds':         lbl_books,
-            'label_ratings':         lbl_rats,
-            'label_timestamps':      lbl_times,
+            'user_id':    uid,
+            'split':      'val' if uid in val_set else 'train',
+            'avg_rating': float(avg_ratings.get(uid, 3.0)),
         })
 
     df = pd.DataFrame(rows)
-    print(f"  User features: {len(df)} users")
+    print(f"  User features: {len(df):,} users  "
+          f"({df['split'].eq('train').sum():,} train, {df['split'].eq('val').sum():,} val)")
     return df
 
 

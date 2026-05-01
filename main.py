@@ -2,11 +2,11 @@
 Book Recommender System — CLI entry point.
 
 Usage:
-    python main.py preprocess [books|interactions|split]  # Stage 1: raw JSONs/CSVs → data/base_*.parquet
+    python main.py preprocess [books|interactions]  # Stage 1: raw JSONs/CSVs → data/base_*.parquet
     python main.py features              # Stage 2: base parquets → data/features_*.parquet
     python main.py dataset               # Stage 3: features + raw → data/dataset_softmax_*_v1.pt
-    python main.py dataset debug         # Stage 3: same but 10k users only (fast debug build)
-    python main.py train                 # Stage 4: in-batch negatives softmax training
+    python main.py dataset debug         # Stage 3: same but 10k train users only (fast debug build)
+    python main.py train                 # Stage 4: full softmax training
     python main.py canary                # Canary user recommendations (most recent checkpoint)
     python main.py canary <path>         # Canary user recommendations (specific checkpoint)
     python main.py probe                 # Embedding probes (most recent checkpoint)
@@ -87,10 +87,11 @@ def cmd_eval(checkpoint_path=None):
     cp = _resolve_checkpoint(checkpoint_path, 'saved_models')
     if cp is None:
         return
+
     print("Loading features ...")
     fs = load_features(DATA_DIR, VERSION)
     model, _, _, _, _, _, _ = _load_model_and_embeddings(cp, fs)
-    run_offline_eval(model, fs, checkpoint_path=cp)
+    run_offline_eval(model, fs, checkpoint_path=cp, data_dir=DATA_DIR)
 
 
 COMMANDS = {
@@ -113,8 +114,8 @@ if __name__ == '__main__':
         sys.exit(1)
     elif args[0] == 'preprocess':
         step = args[1] if len(args) > 1 else None
-        if step not in (None, 'books', 'interactions', 'split'):
-            print("Usage: python main.py preprocess [books|interactions|split]")
+        if step not in (None, 'books', 'interactions'):
+            print("Usage: python main.py preprocess [books|interactions]")
             sys.exit(1)
         cmd_preprocess(step=step)
     elif args[0] == 'dataset':

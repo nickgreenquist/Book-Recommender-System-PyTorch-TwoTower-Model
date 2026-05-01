@@ -16,6 +16,7 @@ import torch
 
 
 TIMESTAMP_NUM_BINS = 1_500
+MAX_HISTORY_LEN    = 50     # cap per-user read history for rollback buffers
 
 
 # ── FeatureStore ──────────────────────────────────────────────────────────────
@@ -46,13 +47,13 @@ class FeatureStore:
     bookId_to_author_idx:    dict  # book_id → primary author vocab index
 
     # Per-user lookups (absent when loaded via load_book_features)
-    user_ids:                        list  = field(default_factory=list)
-    user_to_avg_rating:              dict  = field(default_factory=dict)
-    user_to_genre_context:           dict  = field(default_factory=dict)
-    user_to_read_history:            dict  = field(default_factory=dict)
-    user_to_read_history_ratings:    dict  = field(default_factory=dict)
-    user_to_book_to_rating_LABEL:    dict  = field(default_factory=dict)
-    user_to_book_to_timestamp_LABEL: dict  = field(default_factory=dict)
+    user_ids:           list = field(default_factory=list)
+    train_users:        list = field(default_factory=list)
+    val_users:          list = field(default_factory=list)
+    user_to_avg_rating: dict = field(default_factory=dict)
+
+    # Per-book interaction counts (for popularity debiasing in full softmax)
+    book_interaction_counts: np.ndarray = field(default_factory=lambda: np.array([], dtype=np.float32))
 
     # Derived constants
     user_context_size:   int          = 0
@@ -72,7 +73,7 @@ def load_features(data_dir: str = 'data', version: str = 'v1') -> FeatureStore:
     user_feat_path = os.path.join(data_dir, f'features_users_{version}.parquet')
 
     book_feat_df = pq.read_table(book_feat_path).to_pandas()
-    user_feat_df = pq.read_table(user_feat_path).to_pandas()
+    user_feat_df = pd.read_parquet(user_feat_path)
 
     # ── Vocab ─────────────────────────────────────────────────────────────────
     g = vocab_df[vocab_df['type'] == 'genre'].sort_values('index')
@@ -115,27 +116,18 @@ def load_features(data_dir: str = 'data', version: str = 'v1') -> FeatureStore:
         bookId_to_shelf_context[bid] = list(row['shelf_context'])
         bookId_to_author_idx[bid]    = int(row['author_idx'])
 
-    # ── Per-user feature vectors ──────────────────────────────────────────────
-    user_ids = user_feat_df['user_id'].tolist()
+    # ── Per-book interaction counts (popularity debiasing) ───────────────────
+    ic_map = dict(zip(book_feat_df['book_id'], book_feat_df['interaction_count'].astype(np.float32)))
+    book_interaction_counts = np.array([ic_map.get(bid, 0.0) for bid in top_books], dtype=np.float32)
 
-    user_to_avg_rating           = dict(zip(user_feat_df['user_id'],
-                                            user_feat_df['avg_rating'].astype(float)))
-    user_to_genre_context        = dict(zip(user_feat_df['user_id'],
-                                            user_feat_df['genre_context'].apply(list)))
-    user_to_read_history         = dict(zip(user_feat_df['user_id'],
-                                            user_feat_df['read_history'].apply(list)))
-    user_to_read_history_ratings = dict(zip(user_feat_df['user_id'],
-                                            user_feat_df['read_history_ratings'].apply(list)))
+    # ── Per-user features (user_id, split, avg_rating) ───────────────────────
+    train_users      = user_feat_df[user_feat_df['split'] == 'train']['user_id'].tolist()
+    val_users        = user_feat_df[user_feat_df['split'] == 'val']['user_id'].tolist()
+    user_ids         = train_users + val_users
+    user_to_avg_rating = dict(zip(user_feat_df['user_id'],
+                                  user_feat_df['avg_rating'].astype(float)))
 
-    lbl_books_col = user_feat_df['label_bookIds'].apply(list)
-    lbl_rats_col  = user_feat_df['label_ratings'].apply(list)
-    lbl_times_col = user_feat_df['label_timestamps'].apply(list)
-    uids          = user_feat_df['user_id']
-
-    user_to_book_to_rating_LABEL    = {uid: dict(zip(b, r))
-                                       for uid, b, r in zip(uids, lbl_books_col, lbl_rats_col)}
-    user_to_book_to_timestamp_LABEL = {uid: dict(zip(b, t))
-                                       for uid, b, t in zip(uids, lbl_books_col, lbl_times_col)}
+    print(f"  Users: {len(train_users):,} train | {len(val_users):,} val")
 
     # ── Derived constants ─────────────────────────────────────────────────────
     user_context_size = 2 * len(genres_ordered)
@@ -163,12 +155,10 @@ def load_features(data_dir: str = 'data', version: str = 'v1') -> FeatureStore:
         bookId_to_shelf_context=bookId_to_shelf_context,
         bookId_to_author_idx=bookId_to_author_idx,
         user_ids=user_ids,
+        train_users=train_users,
+        val_users=val_users,
         user_to_avg_rating=user_to_avg_rating,
-        user_to_genre_context=user_to_genre_context,
-        user_to_read_history=user_to_read_history,
-        user_to_read_history_ratings=user_to_read_history_ratings,
-        user_to_book_to_rating_LABEL=user_to_book_to_rating_LABEL,
-        user_to_book_to_timestamp_LABEL=user_to_book_to_timestamp_LABEL,
+        book_interaction_counts=book_interaction_counts,
         user_context_size=user_context_size,
         timestamp_num_bins=TIMESTAMP_NUM_BINS,
         timestamp_bins=timestamp_bins,
@@ -177,9 +167,10 @@ def load_features(data_dir: str = 'data', version: str = 'v1') -> FeatureStore:
 
 def load_book_features(data_dir: str = 'data', version: str = 'v1') -> FeatureStore:
     """Load only book-side features — skips the slow 525k-user parquet.
-    Suitable for probes and export; user_* fields are empty."""
+    Suitable for probes, canary, and export; user_* fields are empty."""
     vocab_df = pd.read_parquet(os.path.join(data_dir, 'base_vocab.parquet'))
     books_df = pd.read_parquet(os.path.join(data_dir, 'base_books.parquet'))
+    ts_df    = pd.read_parquet(os.path.join(data_dir, 'base_timestamps.parquet'))
 
     book_feat_df = pq.read_table(
         os.path.join(data_dir, f'features_books_{version}.parquet')
@@ -223,6 +214,9 @@ def load_book_features(data_dir: str = 'data', version: str = 'v1') -> FeatureSt
         bookId_to_shelf_context[bid] = list(row['shelf_context'])
         bookId_to_author_idx[bid]    = int(row['author_idx'])
 
+    ic_map = dict(zip(book_feat_df['book_id'], book_feat_df['interaction_count'].astype(np.float32)))
+    book_interaction_counts = np.array([ic_map.get(bid, 0.0) for bid in top_books], dtype=np.float32)
+
     return FeatureStore(
         top_books=top_books,
         genres_ordered=genres_ordered,
@@ -241,7 +235,11 @@ def load_book_features(data_dir: str = 'data', version: str = 'v1') -> FeatureSt
         bookId_to_genre_context=bookId_to_genre_context,
         bookId_to_shelf_context=bookId_to_shelf_context,
         bookId_to_author_idx=bookId_to_author_idx,
+        book_interaction_counts=book_interaction_counts,
         user_context_size=2 * len(genres_ordered),
+        timestamp_num_bins=TIMESTAMP_NUM_BINS,
+        timestamp_bins=torch.tensor(np.linspace(
+            int(ts_df['ts_min'].iloc[0]), int(ts_df['ts_max'].iloc[0]), TIMESTAMP_NUM_BINS)),
     )
 
 
@@ -269,9 +267,9 @@ def pad_history_ratings_batch(history_ratings: list) -> torch.Tensor:
 # Each user contributes multiple training examples via "rollback": for a user who
 # read [A, B, C, D, E] in order, context=[A] predicts B, context=[A,B,C] predicts D, etc.
 # Both train and val use rollback (not last-read holdout) to keep context length
-# distributions consistent. MAX_SOFTMAX_EXAMPLES_PER_USER caps examples per user.
+# distributions consistent. MAX_ROLLBACK_EXAMPLES_PER_USER caps examples per user.
 
-MAX_SOFTMAX_EXAMPLES_PER_USER = 10   # rollback examples sampled per user
+MAX_ROLLBACK_EXAMPLES_PER_USER = 10   # rollback examples sampled per user
 
 
 def _rollback_genre_context(ctx_book_idxs: list, ctx_debiased_ratings: list,
@@ -308,7 +306,7 @@ def _rollback_genre_context(ctx_book_idxs: list, ctx_debiased_ratings: list,
 
 
 def build_softmax_dataset(users: list, fs: FeatureStore, raw_df,
-                           max_per_user: int = MAX_SOFTMAX_EXAMPLES_PER_USER,
+                           max_per_user: int = MAX_ROLLBACK_EXAMPLES_PER_USER,
                            seed: int = 42) -> tuple:
     """
     Build rollback training examples for in-batch negatives softmax training.
@@ -328,7 +326,6 @@ def build_softmax_dataset(users: list, fs: FeatureStore, raw_df,
     target_genre/year/author_idx are NOT stored — looked up from model buffers
     at training time using target_book_idx as the corpus index.
     """
-    from src.features import MAX_HISTORY_LEN
     rng       = random.Random(seed)
     users_set = set(users)
     max_hist  = MAX_HISTORY_LEN
@@ -347,15 +344,32 @@ def build_softmax_dataset(users: list, fs: FeatureStore, raw_df,
     df = df.sort_values(['user_id', 'timestamp'])
     print(f"  {df['user_id'].nunique():,} users")
 
-    X_genre           = []
-    X_history         = []
-    X_history_ratings = []
-    timestamps_raw    = []
-    target_book_idx   = []
+    # 1. Counting pass — find exact number of examples for pre-allocation
+    print("  Counting pass ...")
+    n_examples = 0
+    valid_groups = [] # (uid, group)
+    for uid, group in df.groupby('user_id'):
+        n = len(group)
+        if n >= 2:
+            n_examples += min(max_per_user, n - 1)
+            valid_groups.append((uid, group))
 
+    # 2. Pre-allocate NumPy buffers
+    print(f"  Pre-allocating buffers for {n_examples:,} examples ...")
+    X_genre         = np.zeros((n_examples, 2 * n_genres), dtype=np.float32)
+    pad_idx         = len(fs.top_books)
+    X_hist_full     = np.full((n_examples, max_hist), pad_idx, dtype=np.int32)
+    X_hist_liked    = np.full((n_examples, max_hist), pad_idx, dtype=np.int32)
+    X_hist_disliked = np.full((n_examples, max_hist), pad_idx, dtype=np.int32)
+    X_hist_weighted = np.full((n_examples, max_hist), pad_idx, dtype=np.int32)
+    X_rats_weighted = np.zeros((n_examples, max_hist), dtype=np.float32)
+    timestamps_raw  = np.zeros(n_examples, dtype=np.float64)
+    target_book_idx = np.zeros(n_examples, dtype=np.int32)
+
+    # 3. Filling pass
+    curr_idx = 0
     from tqdm import tqdm
-    n_users = df['user_id'].nunique()
-    for uid, group in tqdm(df.groupby('user_id'), total=n_users, desc="Building softmax examples"):
+    for uid, group in tqdm(valid_groups, desc="Filling buffers"):
         avg_rat = fs.user_to_avg_rating.get(uid, 3.0)
 
         books   = group['book_id'].tolist()
@@ -366,65 +380,92 @@ def build_softmax_dataset(users: list, fs: FeatureStore, raw_df,
         if n < 2:
             continue
 
-        # Sample target positions upfront — avoids generating all rollbacks then discarding.
-        # Valid targets: positions 1..n-1 (position 0 has no prior context).
-        # Sorting ensures a single left-to-right scan maintains genre accumulators correctly.
         k               = min(max_per_user, n - 1)
         sampled_targets = sorted(rng.sample(range(1, n), k))
         sampled_set     = set(sampled_targets)
 
-        # Single left-to-right pass: snapshot accumulators at sampled positions,
-        # then update accumulators with the current book for future positions.
         running_count = np.zeros(n_genres, dtype=np.float32)
         running_sum   = np.zeros(n_genres, dtype=np.float32)
-        ctx_ids_buf   = []   # grows as we advance; sliced at each target position
-        ctx_rats_buf  = []
+        
+        # Behavior-based history buffers
+        buf_full     = []   # All books seen
+        buf_liked    = []   # Books with rating 4 or 5
+        buf_disliked = []   # Books with rating 1 or 2
+        buf_w_ids    = []   # Same as full, but used with buf_w_rats for weighted pool
+        buf_w_rats   = []
 
         for pos, (bid, rat, ts) in enumerate(zip(books, ratings, ts_vals)):
             d_rat = rat - avg_rat
+            b_idx = fs.bookId_to_idx[bid]
 
             if pos in sampled_set:
-                # Snapshot: accumulators and ctx buffers reflect books 0..pos-1
                 total_assign = running_count.sum()
-                genre_ctx    = np.zeros(2 * n_genres, dtype=np.float32)
                 if total_assign > 0:
                     mask = running_count > 0
-                    genre_ctx[:n_genres][mask] = running_sum[mask] / running_count[mask]
-                    genre_ctx[n_genres:]       = running_count / total_assign
+                    X_genre[curr_idx, :n_genres][mask] = running_sum[mask] / running_count[mask]
+                    X_genre[curr_idx, n_genres:]       = running_count / total_assign
 
-                t_idx = fs.bookId_to_idx[bid]
-                X_genre.append(genre_ctx.tolist())
-                X_history.append(ctx_ids_buf[-max_hist:])
-                X_history_ratings.append(ctx_rats_buf[-max_hist:])
-                timestamps_raw.append(ts)
-                target_book_idx.append(t_idx)
+                # Fill pre-padded history slots (right-aligned)
+                def fill_hist(target_arr, source_list):
+                    l = len(source_list)
+                    if l > 0:
+                        take = min(l, max_hist)
+                        target_arr[curr_idx, max_hist-take:] = source_list[-take:]
 
-            # Update accumulators and context buffer with current book
-            ctx_ids_buf.append(fs.bookId_to_idx[bid])
-            ctx_rats_buf.append(d_rat)
+                fill_hist(X_hist_full,     buf_full)
+                fill_hist(X_hist_liked,    buf_liked)
+                fill_hist(X_hist_disliked, buf_disliked)
+                fill_hist(X_hist_weighted, buf_w_ids)
+                
+                l_w = len(buf_w_ids)
+                if l_w > 0:
+                    take_w = min(l_w, max_hist)
+                    X_rats_weighted[curr_idx, max_hist-take_w:] = buf_w_rats[-take_w:]
+
+                timestamps_raw[curr_idx]  = ts
+                target_book_idx[curr_idx] = b_idx
+                curr_idx += 1
+
+            # Update buffers with CURRENT book for future target positions
+            buf_full.append(b_idx)
+            if rat >= 4:
+                buf_liked.append(b_idx)
+            elif rat <= 2:
+                buf_disliked.append(b_idx)
+            
+            buf_w_ids.append(b_idx)
+            buf_w_rats.append(d_rat)
+
             for g_idx in book_genre_idxs.get(bid, []):
                 running_count[g_idx] += 1
                 running_sum[g_idx]   += d_rat
 
-    n = len(target_book_idx)
-    print(f"  {n:,} softmax examples — building tensors ...")
+    print(f"  {n_examples:,} softmax examples — building tensors ...")
 
-    X_genre_t         = torch.from_numpy(np.array(X_genre,        dtype=np.float32))
-    target_book_idx_t = torch.from_numpy(np.array(target_book_idx, dtype=np.int64))
+    X_genre_t         = torch.from_numpy(X_genre)
+    X_hist_full_t     = torch.from_numpy(X_hist_full).long()
+    X_hist_liked_t    = torch.from_numpy(X_hist_liked).long()
+    X_hist_disliked_t = torch.from_numpy(X_hist_disliked).long()
+    X_hist_weighted_t = torch.from_numpy(X_hist_weighted).long()
+    X_rats_weighted_t = torch.from_numpy(X_rats_weighted)
+    target_book_idx_t = torch.from_numpy(target_book_idx).long()
+    
     timestamp_t       = torch.bucketize(
-        torch.from_numpy(np.array(timestamps_raw, dtype=np.float64)).float(),
+        torch.from_numpy(timestamps_raw).float(),
         fs.timestamp_bins.float(), right=False)
 
-    return (X_genre_t, X_history, X_history_ratings, timestamp_t, target_book_idx_t)
+    return (X_genre_t, X_hist_full_t, X_hist_liked_t, X_hist_disliked_t, 
+            X_hist_weighted_t, X_rats_weighted_t, timestamp_t, target_book_idx_t)
 
 
 def make_softmax_splits(fs: FeatureStore, data_dir: str = 'data',
-                        max_per_user: int = MAX_SOFTMAX_EXAMPLES_PER_USER,
-                        pct_train: float = 0.9, seed: int = 42,
+                        max_per_user: int = MAX_ROLLBACK_EXAMPLES_PER_USER,
+                        seed: int = 42,
                         max_users: int = None) -> tuple:
     """
-    Load base_interactions_raw.parquet, split users 90/10, build rollback datasets.
-    max_users: if set, subsample (for fast debug runs, e.g. max_users=10_000).
+    Load base_interactions_raw.parquet and build rollback datasets.
+    Train/val split is fixed in features.py (VAL_FRACTION=0.10, VAL_SPLIT_SEED=42).
+    max_users: if set, subsample train users only (for fast debug runs).
     Returns (train_data, val_data).
     """
     import pandas as pd
@@ -433,17 +474,13 @@ def make_softmax_splits(fs: FeatureStore, data_dir: str = 'data',
     raw_df = pd.read_parquet(raw_path)
     print(f"  {len(raw_df):,} raw interactions, {raw_df['user_id'].nunique():,} users")
 
-    valid_users = fs.user_ids[:]
-    rng = random.Random(seed)
-    rng.shuffle(valid_users)
+    train_users = fs.train_users[:]
+    val_users   = fs.val_users[:]
 
     if max_users is not None:
-        valid_users = valid_users[:max_users]
-        print(f"  [debug] subsampled to {len(valid_users):,} users")
-
-    split       = int(len(valid_users) * pct_train)
-    train_users = valid_users[:split]
-    val_users   = valid_users[split:]
+        rng = random.Random(seed)
+        train_users = rng.sample(train_users, min(max_users, len(train_users)))
+        print(f"  [debug] subsampled to {len(train_users):,} train users")
 
     print(f"\nBuilding softmax train dataset ({len(train_users):,} users) ...")
     train_data = build_softmax_dataset(train_users, fs, raw_df, max_per_user, seed)

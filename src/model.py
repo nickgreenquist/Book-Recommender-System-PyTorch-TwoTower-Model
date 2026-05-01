@@ -7,11 +7,12 @@ Registered buffers:
   book_genre_matrix  — (n_books+1, n_genres) genre context; last row = zeros          [non-persistent]
   book_year_idx      — (n_books+1,) year vocab index; last entry = 0                  [non-persistent]
 
-User tower: item_pool(128) + genre(32) + ts(8) = 168 → projection MLP → output_dim
+User tower: 4×sum_pool(32) + genre(16) + shelf_affinity(64) + ts(8) = 216 → projection MLP → output_dim
 Item tower: genre(10) + shelf(40) + book_id(32) + author(10) + year(8) = 100 → projection MLP → output_dim
 """
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
 
 class BookRecommender(nn.Module):
@@ -32,7 +33,8 @@ class BookRecommender(nn.Module):
                  item_year_embedding_size=8,
                  timestamp_embedding_size=8,
                  shelf_embedding_size=40,
-                 user_genre_embedding_size=32,
+                 user_genre_embedding_size=16,
+                 user_shelf_affinity_embedding_size=64,
                  item_genre_embedding_size=10,
                  proj_hidden=256,
                  output_dim=128,
@@ -56,7 +58,7 @@ class BookRecommender(nn.Module):
         )
         self.item_embedding_tower = nn.Sequential(
             nn.Linear(item_id_embedding_size, item_id_embedding_size),
-            nn.Tanh()
+            nn.ReLU()
         )
 
         # ── Item-only author tower ────────────────────────────────────────────
@@ -65,48 +67,64 @@ class BookRecommender(nn.Module):
         )
         self.author_tower = nn.Sequential(
             nn.Linear(author_embedding_size, author_embedding_size),
-            nn.Tanh()
+            nn.ReLU()
         )
 
         # ── Item-only shelf tower ─────────────────────────────────────────────
         shelf_hidden = 128
         self.item_shelf_tower = nn.Sequential(
             nn.Linear(n_shelves, shelf_hidden),
-            nn.Tanh(),
+            nn.ReLU(),
             nn.Linear(shelf_hidden, shelf_embedding_size),
-            nn.Tanh()
+            nn.ReLU()
         )
 
         # ── Item-only towers ──────────────────────────────────────────────────
         self.item_genre_tower = nn.Sequential(
             nn.Linear(n_genres, item_genre_embedding_size),
-            nn.Tanh()
+            nn.ReLU()
         )
         self.year_embedding_lookup = nn.Embedding(n_years, item_year_embedding_size)
         self.year_embedding_tower = nn.Sequential(
             nn.Linear(item_year_embedding_size, item_year_embedding_size),
-            nn.Tanh()
+            nn.ReLU()
         )
 
         # ── User-only towers ──────────────────────────────────────────────────
         genre_hidden = 64
         self.user_genre_tower = nn.Sequential(
             nn.Linear(user_context_size, genre_hidden),
-            nn.Tanh(),
+            nn.ReLU(),
             nn.Linear(genre_hidden, user_genre_embedding_size),
-            nn.Tanh()
+            nn.ReLU()
         )
         self.timestamp_embedding_lookup = nn.Embedding(
             n_timestamp_bins, timestamp_embedding_size
         )
         self.timestamp_embedding_tower = nn.Sequential(
             nn.Linear(timestamp_embedding_size, timestamp_embedding_size),
-            nn.Tanh()
+            nn.ReLU()
+        )
+
+        # ── Quadruple history sum pools with LayerNorm ────────────────────────
+        self.hist_full_norm     = nn.LayerNorm(item_id_embedding_size)
+        self.hist_liked_norm    = nn.LayerNorm(item_id_embedding_size)
+        self.hist_disliked_norm = nn.LayerNorm(item_id_embedding_size)
+        self.hist_weighted_norm = nn.LayerNorm(item_id_embedding_size)
+
+        # ── User-side shelf affinity tower ────────────────────────────────────
+        shelf_aff_hidden = 128
+        self.user_shelf_affinity_tower = nn.Sequential(
+            nn.Linear(n_shelves, shelf_aff_hidden),
+            nn.ReLU(),
+            nn.Linear(shelf_aff_hidden, user_shelf_affinity_embedding_size),
+            nn.ReLU()
         )
 
         # ── Projection MLPs (learn cross-feature interactions) ────────────────
-        # User pools the full output_dim-dim item embedding over read history.
-        user_concat_dim = output_dim + user_genre_embedding_size + timestamp_embedding_size
+        # 4 sum pools × item_id_embedding_size + genre + shelf_affinity + ts
+        user_concat_dim = (4 * item_id_embedding_size + user_genre_embedding_size
+                           + user_shelf_affinity_embedding_size + timestamp_embedding_size)
         item_concat_dim = (item_genre_embedding_size + shelf_embedding_size
                            + item_id_embedding_size + author_embedding_size
                            + item_year_embedding_size)
@@ -140,25 +158,43 @@ class BookRecommender(nn.Module):
         elif isinstance(module, nn.Embedding):
             nn.init.xavier_uniform_(module.weight, gain=0.01)
 
-    def _item_pool(self, X_history, rating_weights, weight_sum):
-        """Pool full projected item embeddings over read history. Returns (B, output_dim)."""
-        B, H = X_history.shape
-        flat = X_history.view(-1)                       # (B*H,)
-        embs = self.item_embedding(flat).view(B, H, -1) # (B, H, output_dim)
-        return (embs * rating_weights).sum(dim=1) / weight_sum
+    def _sum_pool(self, X_history, norm_layer, weights=None):
+        """Shallow sum pooling on item ID embeddings with LayerNorm."""
+        embs = self.item_embedding_lookup(X_history)
+        if weights is not None:
+            embs = embs * weights.unsqueeze(-1)
+        pooled = embs.sum(dim=1)
+        return norm_layer(pooled)
 
-    def user_embedding(self, X_genre, X_history, X_history_ratings, timestamps):
+    def user_embedding(self, X_genre, X_hist_full, X_hist_liked, X_hist_disliked, 
+                       X_hist_weighted, X_rats_weighted, timestamps):
         """User tower. Returns (batch, output_dim)."""
-        pad_mask       = (X_history != self.book_pad_idx).float().unsqueeze(-1)
-        rating_weights = X_history_ratings.unsqueeze(-1) * pad_mask
-        weight_sum     = rating_weights.abs().sum(dim=1).clamp(min=1e-6)
-
         genre_emb   = self.user_genre_tower(X_genre)
         ts_emb      = self.timestamp_embedding_tower(self.timestamp_embedding_lookup(timestamps))
-        history_emb = self._item_pool(X_history, rating_weights, weight_sum)
 
-        concat = torch.cat([history_emb, genre_emb, ts_emb], dim=1)
-        return self.user_projection(concat)
+        # 1. Sum pool history: Full, Liked, Disliked (unweighted sum)
+        pool_full     = self._sum_pool(X_hist_full,     self.hist_full_norm)
+        pool_liked    = self._sum_pool(X_hist_liked,    self.hist_liked_norm)
+        pool_disliked = self._sum_pool(X_hist_disliked, self.hist_disliked_norm)
+
+        # 2. Sum pool history: Rating-weighted
+        pool_weighted = self._sum_pool(X_hist_weighted, self.hist_weighted_norm, 
+                                       weights=X_rats_weighted)
+        
+        history_emb = torch.cat([pool_full, pool_liked, pool_disliked, pool_weighted], dim=1)
+
+        # ── User Genome (Shelf Affinity) ──
+        pad_mask       = (X_hist_weighted != self.book_pad_idx).float().unsqueeze(-1)
+        rating_weights = X_rats_weighted.unsqueeze(-1) * pad_mask
+        weight_sum     = rating_weights.abs().sum(dim=1).clamp(min=1e-6)
+        
+        history_shelves = self.book_shelf_matrix[X_hist_weighted]
+        shelf_affinity  = (history_shelves * rating_weights).sum(dim=1) / weight_sum
+        shelf_affinity_emb = self.user_shelf_affinity_tower(shelf_affinity)
+
+        concat = torch.cat([history_emb, genre_emb, shelf_affinity_emb, ts_emb], dim=1)
+        out = self.user_projection(concat)
+        return F.normalize(out, p=2, dim=1)
 
     def item_embedding(self, target_book_idx):
         """Item tower. Looks up all features from registered buffers. Returns (batch, output_dim)."""
@@ -171,10 +207,19 @@ class BookRecommender(nn.Module):
                               self.year_embedding_lookup(self.book_year_idx[target_book_idx]))
         concat = torch.cat([item_genre_emb, item_shelf_emb, item_emb,
                             item_author_emb, year_emb], dim=1)
-        return self.item_projection(concat)
+        out = self.item_projection(concat)
+        return F.normalize(out, p=2, dim=1)
 
-    def forward(self, X_genre, X_history, X_history_ratings, timestamps, target_book_idx):
+    def full_item_embedding(self):
+        """Returns all item embeddings in the corpus (n_books, output_dim)."""
+        n_books = self.book_pad_idx # book_pad_idx is n_books
+        all_idxs = torch.arange(n_books, device=self.book_shelf_matrix.device)
+        return self.item_embedding(all_idxs)
+
+    def forward(self, X_genre, X_hist_full, X_hist_liked, X_hist_disliked,
+                X_hist_weighted, X_rats_weighted, timestamps, target_book_idx):
         """Dot-product score for a (user, item) pair."""
-        user_emb = self.user_embedding(X_genre, X_history, X_history_ratings, timestamps)
+        user_emb = self.user_embedding(X_genre, X_hist_full, X_hist_liked, X_hist_disliked,
+                                       X_hist_weighted, X_rats_weighted, timestamps)
         item_emb = self.item_embedding(target_book_idx)
         return torch.einsum('ij,ij->i', user_emb, item_emb)

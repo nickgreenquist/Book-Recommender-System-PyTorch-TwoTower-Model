@@ -33,8 +33,10 @@ def run_export(data_dir: str = 'data', checkpoint_path: str = None,
     # ── Resolve checkpoint ────────────────────────────────────────────────────
     if checkpoint_path is None:
         candidates = sorted(
-            glob.glob(os.path.join('saved_models', 'best_proj_softmax_ipool_*.pth')) +
-            glob.glob(os.path.join('saved_models', 'proj_softmax_ipool_*.pth')),
+            glob.glob(os.path.join('saved_models', 'best_full_softmax_4pool_popularity_alpha_*.pth')) +
+            glob.glob(os.path.join('saved_models', 'full_softmax_4pool_popularity_alpha_*_step_*.pth')) +
+            glob.glob(os.path.join('saved_models', 'best_softmax_4pool_*.pth')) +
+            glob.glob(os.path.join('saved_models', 'softmax_4pool_*.pth')),
             key=os.path.getmtime, reverse=True,
         )
         if not candidates:
@@ -43,7 +45,15 @@ def run_export(data_dir: str = 'data', checkpoint_path: str = None,
         checkpoint_path = candidates[0]
 
     print(f"Checkpoint: {checkpoint_path}")
-    config = get_softmax_config()
+    config_path = checkpoint_path.replace('.pth', '.json')
+    if os.path.exists(config_path):
+        import json
+        with open(config_path, 'r') as f:
+            config = json.load(f)
+        print(f"Loading config from: {config_path}")
+    else:
+        config = get_softmax_config()
+        print(f"Config sidecar not found, using defaults from get_softmax_config()")
 
     print("Loading features ...")
     fs = load_features(data_dir, version)
@@ -156,6 +166,8 @@ def run_export(data_dir: str = 'data', checkpoint_path: str = None,
         # Non-persistent buffers — needed at serving time for ipool models
         'book_genre_matrix':  book_genre_matrix,
         'book_year_idx':      book_year_idx,
+        # Per-book popularity counts (for inference-time popularity debiasing)
+        'book_interaction_counts': fs.book_interaction_counts,  # numpy (n_books,) float32
         # Derived constants
         'user_context_size':  fs.user_context_size,
         'timestamp_num_bins': fs.timestamp_num_bins,
