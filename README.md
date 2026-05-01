@@ -51,6 +51,30 @@ Item Tower:
 Prediction: dot_product(user_embedding, item_embedding)
 ```
 
+## V2 Experiment — Industry-Standard Architecture (Not Promoted)
+
+The goal of the V2 experiment was to make the user tower more industry-standard while eliminating the 8× training slowdown of ipool. In the ipool (current PROD) architecture, the user tower pools the full 128-dim projected item embedding over every book in read history — this means the entire item tower (shelf MLP + genre MLP + author MLP) runs once per history item per training step.
+
+**What V2 changed:**
+
+- Replaced the single ipool with four parallel shallow sum pools over raw 32-dim ID embeddings: `history_full`, `history_liked`, `history_disliked`, `history_weighted`, each stabilized with LayerNorm
+- Added a dedicated `user_shelf_affinity_tower` — pools the user's per-book TF-IDF shelf vectors over read history to produce a 64-dim taste representation, intended to recover the shelf signal lost by dropping ipool
+- Adopted full softmax (score against all ~11k books per step) with popularity debiasing (`alpha * log1p(interaction_count)`)
+- L2 normalization on both tower outputs, CosineAnnealingLR, gradient clipping
+- Dataset RAM reduced ~3× by looking up item features from registered buffers at training time rather than storing them in dataset tensors
+
+**Result: V2 was trained to 150k steps but not promoted to production.**
+
+The canary comparison against PROD (ipool) showed PROD substantially better across most categories — especially the hardest ones to get right:
+
+- **Nick (personal canary)**: PROD recommended Battle Cry of Freedom, Founding Brothers, Flags of Our Fathers, An Army at Dawn. V2 recommended the same core but with Checklist Manifesto, Mindset, Getting Things Done bleeding in.
+- **Sci-Fi**: PROD recommended Singularity Sky, Revelation Space, Accelerando, Spin, Mote in God's Eye — hard SF deep cuts across Stross/Reynolds/Vinge/Niven. V2 clustered around Asimov and Hyperion.
+- **Classic Lit**: PROD recommended Chekhov, Molière, Balzac, Aristotle — broad international coverage. V2 clustered on Dickens (4/10 Dickens titles).
+
+**Why ipool wins:** Pooling full projected item embeddings (128-dim, including shelf MLP output) directly into the user representation gives the user tower rich, learned content signal for every book they have read. V2's `user_shelf_affinity_tower` operates on raw TF-IDF vectors rather than learned embeddings, and the shallow 32-dim ID pools don't carry enough content information to compensate. The shelf signal flowing implicitly through item embeddings into the user representation is the core strength of ipool — and it is difficult to replicate with a separate user-side tower.
+
+PROD wins 10 of 13 comparable canary categories. V2 code is preserved on branch `v2`.
+
 ## Usage
 
 ```bash
