@@ -147,22 +147,9 @@ Prediction: dot_product(user_embedding, item_embedding)
 
 ## Canary Users for Eval
 
-```python
-USER_TYPE_TO_FAVORITE_GENRES = {
-    'Mystery Lover':   ['Mystery', 'Thriller', 'Crime'],
-    'Fantasy Lover':   ['Fantasy'],
-}
-USER_TYPE_TO_FAVORITE_BOOKS = {
-    'Mystery Lover':   ['Gone Girl', 'The Girl with the Dragon Tattoo', 'Big Little Lies'],
-    'Fantasy Lover':   ['The Name of the Wind', 'The Way of Kings', 'A Game of Thrones'],
-}
-USER_TYPE_TO_SHELF_TAGS = {
-    'Mystery Lover':   ['mystery', 'suspense', 'crime', 'thriller'],
-    'Fantasy Lover':   ['fantasy', 'magic', 'epic-fantasy', 'world-building'],
-}
-```
+Defined in `src/evaluate.py` as `USER_TYPE_TO_FAVORITE_BOOKS`, `USER_TYPE_TO_LIKED_BOOKS`, and `USER_TYPE_TO_SHELF_TAGS`. 16 user types covering: Mystery, Fantasy, Romance, YA, History, Classic, Horror, Sci-Fi, NonFiction, Economics, Philosophy, Graphic Novel, Manga, Christianity, Poetry, Children's — plus Nick's personal canary.
 
-Canary users are synthetic — no real read timestamps. All receive `ts_max_bin`.
+Genre context is derived entirely from the user's book history (no explicit genre override). Shelf tags are used to pull anchor books via `_get_anchor_titles()`. All canary users are synthetic — no real read timestamps. All receive `ts_max_bin`.
 
 ## Relationship to Movie Repo
 
@@ -215,7 +202,7 @@ Secondary goals: adopt full softmax (score against all ~11k books per step inste
 
 ### Results
 
-Trained to 150k steps with corrected temperature (`0.1`) and `popularity_alpha=0.0`. **V2 beat PROD on both canary quality and offline eval — and was promoted to production.**
+Trained to 150k steps with corrected temperature (`0.1`). **V2 beat PROD on both canary quality and offline eval — and was promoted to production.**
 
 **Note on earlier failed V2 run (April 2026):** The first V2 training used `temperature = 0.5/batch_size = 0.001`, which is correct for in-batch negatives but wrong for full softmax over 11k books. The near-zero temperature collapses gradients to argmax and caused popularity overfitting. This produced the weak results documented in the initial comparison. After fixing the temperature to `0.1`, V2 beat PROD convincingly.
 
@@ -271,7 +258,7 @@ V2 is now main. The `use_item_pool_for_history=True` flag in `get_softmax_config
 
 **~~Sampled softmax~~** — ✅ Implemented and validated. Softmax is now the primary training path (`python main.py train softmax`). ID embeddings gained semantic structure vs BPR (King/horror cluster, LOTR/fantasy cluster confirmed via probe and canary). Canary results are strong for Literary, NonFiction, Fantasy, Sci-Fi, History, YA. Known weak spots: Horror (no horror genre in vocab — relies purely on shelf signals) and Romance (model conflates literary women's fiction with romance).
 
-**Year feature:** `preprocess books` uses original publication year. Current checkpoint (`best_proj_softmax_ipool_20260426_093432.pth`) was trained with correct year vocab — no retraining needed.
+**Year feature:** `preprocess books` uses original publication year. Current PROD checkpoint was trained with correct year vocab — no retraining needed.
 
 **Next training improvements:**
 1. **~~LR schedule~~** — ✅ Implemented. CosineAnnealingLR from 0.001→0 over training steps. Eliminated the early plateau seen in the first softmax run.
@@ -327,7 +314,7 @@ Key design decisions from the paper that directly apply to our softmax implement
 
 **Negative sampling:**
 - The paper recommends sampling several thousand negatives per step from the background distribution (popularity-proportional) with importance weighting to correct for sampling bias.
-- **Our implementation uses in-batch negatives instead** — the other 511 items in each batch of 512 serve as negatives. Simpler and effective for our ~11k book corpus. Dedicated sampled negatives would be more important at larger corpus sizes.
+- **Our implementation uses full softmax instead** — score against all ~11k books per step (U @ V_all.T). Simpler than sampled negatives and avoids in-batch popularity bias. Dedicated sampled negatives would be more important at much larger corpus sizes.
 
 **"Example age" feature (skip for books):**
 - The paper feeds `age = t_max - t_read` to correct bias toward older popular videos. For books this doesn't apply — *Crime and Punishment* is as recommendable as a book published last month, and the corpus is essentially static.
