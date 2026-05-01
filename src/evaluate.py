@@ -151,11 +151,15 @@ USER_TYPE_TO_FAVORITE_BOOKS = {
     'NonFiction Lover': [
         'Sapiens: A Brief History of Humankind',
         'Thinking, Fast and Slow',
+        'A Short History of Nearly Everything',
+        "Quiet: The Power of Introverts in a World That Can't Stop Talking",
     ],
     'Economics Lover': [
         'The Intelligent Investor',
         'The Wealth of Nations',
         'Capital in the Twenty-First Century',
+        'The Undercover Economist',
+        'The Road to Serfdom'
     ],
     'Philosophy & Existentialist Thinker': [
         'The Republic',
@@ -179,13 +183,10 @@ USER_TYPE_TO_FAVORITE_BOOKS = {
         'Berserk, Vol. 1 (Berserk, #1)',
         'Death Note, Vol. 11: Kindred Spirits (Death Note, #11)',
     ],
-    'Religion Book Reader': [
+    'Christianity Book Reader': [
         'Holy Bible: New International Version',
-        'Crazy Love: Overwhelmed by a Relentless God',
-        'The Red Tent',
-        'Siddhartha',
-        'الرحيق المختوم',
-        'Orthodoxy'
+        'Orthodoxy',
+        "Foxe's Book of Martyrs"
     ],
     'Poetry Lover': [
         'Leaves of Grass',
@@ -332,7 +333,7 @@ USER_TYPE_TO_LIKED_BOOKS = {
     'Philosophy & Existentialist Thinker': [],
     'Graphic Novel/Comic Lover': [],
     'Manga Lover':            [],
-    'Religion Book Reader':   [],
+    'Christianity Book Reader':   [],
     'Poetry Lover':           [],
     "Children's Book Lover":  [],
 }
@@ -348,11 +349,11 @@ USER_TYPE_TO_SHELF_TAGS = {
     'Horror Lover':    ['horror'],
     'Sci-Fi Lover':    ['science-fiction', 'sci-fi'],
     'NonFiction Lover':  ['non-fiction'],
-    'Economics Lover': ['economics'],
+    'Economics Lover': ['economics', 'economy'],
     'Philosophy & Existentialist Thinker': ['philosophy', 'existentialism'],
     'Graphic Novel/Comic Lover': ['graphic-novels', 'comics', 'graphic-novel'],
     'Manga Lover':     ['anime', 'mangas'],
-    'Religion Book Reader': ['religion'],
+    'Christianity Book Reader': ['christian'],
     'Poetry Lover':    ['poetry'],
     "Children's Book Lover": ['childrens', 'children-s', 'picture-books'],
 }
@@ -789,8 +790,23 @@ def _load_model_and_embeddings(checkpoint_path: str, fs):
 
 # ── Orchestrators ─────────────────────────────────────────────────────────────
 
+class _Tee:
+    """Write to stdout and a file simultaneously."""
+    def __init__(self, file):
+        import sys
+        self._stdout = sys.stdout
+        self._file   = file
+    def write(self, data):
+        self._stdout.write(data)
+        self._file.write(data)
+    def flush(self):
+        self._stdout.flush()
+        self._file.flush()
+
+
 def run_canary(data_dir: str = 'data', checkpoint_path: str = None,
                version: str = 'v1') -> None:
+    import sys
     from src.dataset import load_book_features
     cp = _resolve_checkpoint(checkpoint_path, 'saved_models')
     if cp is None:
@@ -800,10 +816,23 @@ def run_canary(data_dir: str = 'data', checkpoint_path: str = None,
     model, cp_config, book_embeddings, all_ids, all_embs, all_norm, all_norm_id, all_norm_shelf, all_norm_genre = _load_model_and_embeddings(cp, fs)
     alpha = cp_config.get('popularity_alpha', 0.0)
     temperature = cp_config.get('temperature', 0.5 / cp_config.get('minibatch_size', 512))
-    print(f"  popularity_alpha={alpha} ({'applied' if alpha > 0 else 'disabled'})  temperature={temperature:.6f}")
-    print("\n── Canary user evaluation ──")
-    run_canary_eval(model, fs, book_embeddings, all_ids, all_embs,
-                    popularity_alpha=alpha, temperature=temperature)
+
+    os.makedirs('canary_results', exist_ok=True)
+    cp_name  = os.path.splitext(os.path.basename(cp))[0]
+    out_path = os.path.join('canary_results', f'{cp_name}.txt')
+
+    with open(out_path, 'w') as f:
+        sys.stdout = _Tee(f)
+        try:
+            print(f"Checkpoint: {cp}")
+            print(f"popularity_alpha={alpha} ({'applied' if alpha > 0 else 'disabled'})  temperature={temperature:.6f}")
+            print("\n── Canary user evaluation ──")
+            run_canary_eval(model, fs, book_embeddings, all_ids, all_embs,
+                            popularity_alpha=alpha, temperature=temperature)
+        finally:
+            sys.stdout = sys.stdout._stdout
+
+    print(f"\nCanary results written to {out_path}")
 
 
 PROBE_SIMILAR_TITLES = [
@@ -817,7 +846,9 @@ PROBE_SIMILAR_TITLES = [
     'It',
     "Ender's Game (Ender's Saga, #1)",
     'Fullmetal Alchemist, Vol. 9 (Fullmetal Alchemist, #9)',
-    'Thinner'
+    'Thinner',
+    'Holy Bible: New International Version',
+    'The Intelligent Investor',
 ]
 
 
@@ -838,5 +869,6 @@ def run_probes(data_dir: str = 'data', checkpoint_path: str = None,
     probe_shelf(['science-fiction', 'sci-fi', 'space'], book_embeddings, fs, all_ids, all_norm_shelf)
     probe_shelf(['epic-fantasy', 'magic', 'world-building'], book_embeddings, fs, all_ids, all_norm_shelf)
     probe_shelf(['manga', 'mangá', 'mangas', 'anime'], book_embeddings, fs, all_ids, all_norm_shelf)
+    probe_shelf(['religion'], book_embeddings, fs, all_ids, all_norm_shelf)
     probe_similar(book_embeddings, fs, all_ids, all_norm, PROBE_SIMILAR_TITLES,
                   all_norm_id=all_norm_id, all_norm_shelf=all_norm_shelf)

@@ -39,13 +39,17 @@ def get_softmax_config() -> dict:
         'weight_decay':     0.0,
         'adam_eps':         1e-6,
         'minibatch_size':   512,
-        'popularity_alpha': 0.4,    # logit-space penalty: alpha * log1p(ratings_count); 0=off
+        'popularity_alpha': 0.0,    # logit-space penalty: alpha * log1p(ratings_count); 0=off
         'training_steps':   150_000,
         'log_every':        5_000,
         'checkpoint_every': 30_000,
         'checkpoint_dir':   'saved_models',
+        # Full softmax scores against all ~11k books per step — temperature needs to be
+        # softer than in-batch negatives (0.05) because 11k negatives already provide
+        # strong contrast. 0.5/batch_size gave ~0.001 (effectively argmax), causing
+        # gradient collapse onto the hardest negative and popularity overfitting.
+        'temperature':      0.1,
     }
-    config['temperature'] = 0.5 / config['minibatch_size']
     return config
 
 
