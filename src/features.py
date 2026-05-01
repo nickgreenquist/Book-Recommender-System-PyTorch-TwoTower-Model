@@ -23,12 +23,13 @@ MAX_HISTORY_LEN  = 50   # cap read history to most recent N books
 
 def load_base(data_dir: str) -> dict:
     files = [
-        ('books',        'base_books.parquet'),
-        ('vocab',        'base_vocab.parquet'),
-        ('read',         'base_ratings_read.parquet'),
-        ('labels',       'base_ratings_labels.parquet'),
-        ('timestamps',   'base_timestamps.parquet'),
-        ('book_shelves', 'base_book_shelves.parquet'),
+        ('books',         'base_books.parquet'),
+        ('vocab',         'base_vocab.parquet'),
+        ('read',          'base_ratings_read.parquet'),
+        ('labels',        'base_ratings_labels.parquet'),
+        ('interactions',  'base_interactions_raw.parquet'),
+        ('timestamps',    'base_timestamps.parquet'),
+        ('book_shelves',  'base_book_shelves.parquet'),
     ]
     result = {}
     for key, filename in files:
@@ -61,14 +62,18 @@ def parse_vocab(vocab_df: pd.DataFrame) -> dict:
 def build_book_features(base: dict, vocab: dict) -> pd.DataFrame:
     """
     Returns DataFrame with one row per book:
-      book_id, book_idx, year, genre_context, shelf_context, author_indices
+      book_id, book_idx, year, genre_context, shelf_context, author_idx,
+      interaction_count
 
-    genre_context  — float vector length n_genres, rank-based normalized weights
-    shelf_context  — float vector length n_shelves, TF-IDF shelf scores (count/total * log(N/df))
-    author_idx     — int, primary author vocab index; 0 (__unknown__) if no authors
+    genre_context      — float vector length n_genres, rank-based normalized weights
+    shelf_context      — float vector length n_shelves, TF-IDF shelf scores
+    author_idx         — int, primary author vocab index; 0 (__unknown__) if no authors
+    interaction_count  — number of corpus interactions for this book (for popularity debiasing)
     """
     books_df        = base['books']
     book_shelves_df = base['book_shelves']
+
+    interaction_counts = base['interactions'].groupby('book_id').size().to_dict()
 
     genre_to_i  = vocab['genre_to_i']
     shelf_to_i  = vocab['shelf_to_i']
@@ -112,12 +117,13 @@ def build_book_features(base: dict, vocab: dict) -> pd.DataFrame:
         author_idx = author_to_i.get(str(raw_ids[0]), 0) if raw_ids else 0
 
         rows.append({
-            'book_id':       bid,
-            'book_idx':      book_to_idx[bid],
-            'year':          year,
-            'genre_context': genre_ctx,
-            'shelf_context': book_shelf_ctx.get(bid, [0.0] * n_shelves),
-            'author_idx':    author_idx,
+            'book_id':           bid,
+            'book_idx':          book_to_idx[bid],
+            'year':              year,
+            'genre_context':     genre_ctx,
+            'shelf_context':     book_shelf_ctx.get(bid, [0.0] * n_shelves),
+            'author_idx':        author_idx,
+            'interaction_count': float(interaction_counts.get(bid, 0)),
         })
 
     df = pd.DataFrame(rows)
