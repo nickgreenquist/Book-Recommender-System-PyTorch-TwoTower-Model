@@ -11,7 +11,7 @@ This is a sibling project to the MovieLens Two-Tower model at:
 
 The architecture follows the same two-tower design but adds an **author embedding tower** not present in the movie model. Preprocessing differs significantly (different schema, two-step streaming pipeline). When in doubt about shared architecture decisions, refer to the movie repo's CLAUDE.md.
 
-**Critical design choice: no user ID embedding.** Users are represented entirely by their taste signals: read history (quadruple sum pools over item ID embeddings), genre affinity, shelf affinity, and timestamp. Any user can be represented at inference time with just a few books they liked — no retraining required.
+**Critical design choice: no user ID embedding.** Users are represented entirely by their taste signals: read history (rating-weighted avg pool over full projected item embeddings), genre affinity, and timestamp. Any user can be represented at inference time with just a few books they liked — no retraining required.
 
 **Proven design choice: user tower is intentionally simple.** Shelf and author pooling were removed from the user side after experimentation showed they degraded probe_similar quality — shared towers pulled item embeddings in too many directions during training. Shelf and author signals live only on the item side.
 
@@ -46,10 +46,10 @@ Raw data lives in `data/` (not in git). Required files:
 ### Filtering thresholds
 
 ```python
-MIN_RATINGS_PER_BOOK = 7_500   # based on goodreads_books.json ratings_count → ~14.7k books
-MIN_RATINGS_PER_USER = 15      # corpus ratings only
+MIN_RATINGS_PER_BOOK = 10_000  # based on goodreads_books.json ratings_count → ~11k books
+MIN_RATINGS_PER_USER = 20      # corpus ratings only
 MAX_RATINGS_PER_USER = 1_000
-MIN_NUM_SHELVES      = 2_000   # shelf must appear this many times across corpus books
+MIN_NUM_SHELVES      = 500     # shelf must appear this many times across corpus books
 ```
 
 Books below `MIN_RATINGS_PER_BOOK` are filtered out entirely — not in training and not in the recommendation corpus. Users outside `MIN_RATINGS_PER_USER` / `MAX_RATINGS_PER_USER` are dropped.
@@ -99,51 +99,33 @@ Two separate steps — run `preprocess books` first, inspect the corpus size, th
 - Only shelves appearing `>= MIN_NUM_SHELVES` times across corpus books are kept
 - Stored in `base_book_shelves.parquet`
 
-## Model Architecture (V2)
+## Model Architecture (PROD)
 
-Two-tower design with Full Softmax over the entire corpus (~11k books).
+Two-tower design with in-batch negatives softmax training (~11k book corpus).
 
 ```
-User Tower (Quadruple History Sum Pooling):
-  sum_pool(item_id_embeddings[history_full])     → 32-dim + LayerNorm
-  sum_pool(item_id_embeddings[history_liked])    → 32-dim + LayerNorm
-  sum_pool(item_id_embeddings[history_disliked]) → 32-dim + LayerNorm
-  sum_pool(item_id_embeddings[history_weighted]) → 32-dim + LayerNorm
-  user_genre_tower(rollback_genre_affinity)      → 16-dim
-  user_shelf_affinity_tower(pooled_shelf_tfidf)  → 64-dim
-  timestamp_embedding_tower(read_month)          → 8-dim
-  concat (216-dim) → projection MLP (256) → 128-dim → L2 Norm
+User Tower:
+  rating_weighted_avg_pool(full_item_embeddings[read_history])  → 128-dim
+  user_genre_tower([avg_rating_per_genre | read_frac])          → 32-dim
+  timestamp_embedding_tower(read_month)                         → 8-dim
+  concat (168-dim) → projection MLP (256) → 128-dim user embedding
 
 Item Tower:
-  item_genre_tower(genre_weighted)     → 10-dim
-  item_shelf_tower(tfidf_shelf_scores) → 40-dim
-  item_embedding_tower(book_id)        → 32-dim
-  author_tower(primary_author_idx)     → 10-dim
-  year_embedding_tower(pub_year)       → 8-dim
-  concat (100-dim) → projection MLP (256) → 128-dim → L2 Norm
+  item_genre_tower(genre_weighted)      → 10-dim
+  item_shelf_tower(tfidf_shelf_scores)  → 40-dim
+  item_embedding_tower(book_id)         → 32-dim
+  author_tower(primary_author_idx)      → 10-dim
+  year_embedding_tower(pub_year)        → 8-dim
+  concat (100-dim) → projection MLP (256) → 128-dim item embedding
 
 Prediction: dot_product(user_embedding, item_embedding)
 ```
 
-### Key V2 Improvements:
-1. **Full Softmax**: Scores against all ~11k items instead of in-batch negatives.
-2. **ReLU Activations**: Replaced all Tanh with ReLU.
-3. **L2 Normalization**: Final embeddings are L2 normalized before dot product.
-4. **Quadruple History**: History partitioned into Liked, Disliked, Full, and Weighted pools.
-5. **Shallow Sum Pooling**: Pools directly on ID embeddings (32-dim) instead of deep item tower outputs.
-6. **LayerNorm**: Stabilizes sum-pooled history magnitudes.
-7. **User Genome Context**: On-the-fly shelf affinity pooling in the user tower.
-8. **Apple Silicon GPU**: Training and Eval use `mps` device when available.
-9. **No Weight Decay**: Relying on architecture compression for regularization.
-10. **Gradient Clipping**: Norm clipped at 1.0.
-11. **Config Sidecar**: `.json` config saved alongside each `.pth` checkpoint.
-
 ### Preprocessing & Dataset
 - **No per-user history split in preprocess**: `preprocess.py` writes only `base_interactions_raw.parquet`. No `base_ratings_read` / `base_ratings_labels`.
-- **User-level train/val split in features.py**: `build_user_features()` assigns `split='train'/'val'` (90/10, `VAL_SPLIT_SEED=42`). Stored in `features_users_v1.parquet` as `user_id, split, avg_rating` only.
-- **Rollback for both train and val**: `build_softmax_dataset()` reads `base_interactions_raw.parquet` directly and generates rollback examples. `make_softmax_splits()` uses `fs.train_users` / `fs.val_users` from FeatureStore.
-- **Partitioned History**: `dataset.py` builds 4 separate history indices per example (full, liked, disliked, weighted).
-- **Dynamic Genre/Shelf**: All user-side affinity signals are built from the rollback context slice (no future leakage).
+- **Full user features in features.py**: `build_user_features()` outputs per-user genre context, read history, read history ratings, and label sets. Full user feature parquet.
+- **Rollback for both train and val**: `build_softmax_dataset()` reads `base_interactions_raw.parquet` directly and generates rollback examples. `make_softmax_splits()` does 90/10 user split internally (`seed=42`).
+- **Dynamic Genre**: Genre context built from rollback context slice only (no future leakage).
 
 ## Canary Users for Eval
 
@@ -169,10 +151,10 @@ Canary users are synthetic — no real read timestamps. All receive `ts_max_bin`
 | File | Status |
 |------|--------|
 | `preprocess.py` | Rewritten — two-step streaming pipeline (books + interactions only, no split), Goodreads schema |
-| `features.py` | Adapted — user-level 90/10 train/val split; outputs `user_id, split, avg_rating` only (no history/label columns) |
-| `dataset.py` | Adapted — `FeatureStore` has `train_users`/`val_users`; `make_softmax_splits()` uses them directly; rollback reads `base_interactions_raw.parquet` |
-| `model.py` | Extended — author tower on item side; V2 quadruple shallow pools + user shelf affinity tower; non-persistent buffers for `book_genre_matrix`, `book_year_idx` |
-| `train.py` | Adapted — V2 config; full softmax (U @ V_all.T); checkpoint naming encodes architecture |
+| `features.py` | Adapted — outputs full per-user features (genre context, read history, label sets) for ipool architecture |
+| `dataset.py` | Adapted — `make_softmax_splits()` does 90/10 user split and rollback from `base_interactions_raw.parquet`; 5-tuple format |
+| `model.py` | Extended — author tower on item side; ipool (rating-weighted avg pool over full projected item embeddings); non-persistent buffers for `book_genre_matrix`, `book_year_idx` |
+| `train.py` | Adapted — softmax with in-batch negatives; CosineAnnealingLR; checkpoint naming `best_proj_softmax_ipool_*.pth` |
 | `evaluate.py` | Adapted — canary dicts use book titles and shelf tags; shelf embedding probe table added |
 | `export.py` | Adapted — resolves all architecture variants from checkpoint basename; stores non-persistent buffers in `feature_store.pt` |
 
@@ -264,8 +246,8 @@ All V2 code lives on branch `v2`. The `use_item_pool_for_history=True` flag in `
 1. **~~LR schedule~~** — ✅ Implemented. CosineAnnealingLR from 0.001→0 over training steps. Eliminated the early plateau seen in the first softmax run.
 2. **~~Larger batch~~** — ✅ 512 (511 in-batch negatives). Confirmed better drop-from-baseline than batch=256.
 3. **~~In-batch negative debiasing (log-frequency correction)~~** — ❌ Tried and removed. Subtracting `log(p_i)` from negative logits (Yi et al., Google RecSys 2019) did not converge on this dataset. Root causes: (a) with ~11k books, the item frequency distribution is very compressed — corrections ranged from 4.91 to 10.0 with ~87% of books clustered near 9-10, so the correction added almost no useful signal. (b) The correction destabilized training even with L2 normalization and diagonal zeroing. Do not re-attempt without a much larger, more skewed item distribution.
-4. **~~Remove F.normalize from training (match YouTube paper)~~** — ✅ Done and re-added for V2. V2 adds L2 norm back at the output of both towers (as `F.normalize` in `user_embedding()` and `item_embedding()`). This stabilizes training with shallow sum pooling and ensures dot product = cosine similarity between normalized 128-dim vectors.
-5. **~~Item tower pooling~~** — ✅ Implemented and validated (+8%). Superseded by V2 which achieves the content signal via a dedicated `user_shelf_affinity_tower` on the user side, while keeping user history pools shallow (ID embeddings only). This avoids the 8× training slowdown.
+4. **~~Remove F.normalize from training (match YouTube paper)~~** — ✅ Done. PROD does not apply L2 normalization on embeddings; raw dot products are used throughout training and inference.
+5. **~~Item tower pooling~~** — ✅ Implemented and validated (+8%). Current PROD architecture. See V2 Experiment section for the failed attempt to replace it with shallow pools.
 
 **Implicit vs explicit feedback tradeoff** — explicit ratings (BPR) give clean preference signal but are sparse. Implicit feedback (reads via `is_read`) is abundant but noisy. Consider a hybrid: softmax for candidate generation, explicit ratings for a separate ranking stage.
 
@@ -275,7 +257,7 @@ All V2 code lives on branch `v2`. The `use_item_pool_for_history=True` flag in `
 
 **Protocol:** Rollback examples from val users (same generation logic as training). For each val user, rollback examples are generated from `base_interactions_raw.parquet` — context = all reads before position i, target = read at position i. Metrics are per-example (single target per example, not multi-target per user).
 
-Val users are fixed in `features.py` (`VAL_FRACTION=0.10`, `VAL_SPLIT_SEED=42`), stored in `fs.val_users`. 5,000 val users sampled with `random.Random(42)` for reproducibility.
+Val users are the 10% held out inside `make_softmax_splits()` (90/10 random split, `seed=42`). 5,000 val users sampled with `random.Random(42)` for reproducibility.
 
 **Metrics:** Recall@K, Hit Rate@K, NDCG@K, MRR at K = 1, 5, 10, 20, 50.
 
@@ -298,11 +280,11 @@ V2 (quadruple shallow pools + user shelf affinity tower) did not beat these numb
 - **Horror**: Stronger — tighter horror cluster (The Rats, Hell House, Swan Song, Cabal) vs diluted results from older checkpoints.
 - **Nick (personal canary)**: Better historical/WWII focus (Battle Cry of Freedom, Flags of Our Fathers, With the Old Breed) vs financial noise from older checkpoint.
 
-**Checkpoint naming convention:** all checkpoints use the `softmax_4pool` prefix (V2 architecture — quadruple shallow ID-embedding pools):
-- `best_softmax_4pool_*.pth` — best val loss checkpoint
-- `softmax_4pool_*_step_NNNNNN.pth` — periodic checkpoint
+**Checkpoint naming convention:**
+- `best_proj_softmax_ipool_*.pth` — best val loss checkpoint
+- `proj_softmax_ipool_*_step_NNNNNN.pth` — periodic checkpoint
 
-`_resolve_checkpoint` in `evaluate.py` and `run_export` in `export.py` both look for these prefixes, newest first.
+`_resolve_checkpoint` in `evaluate.py` and `run_export` in `export.py` look for these prefixes, newest first.
 
 ### YouTube DNN implementation details (Covington et al., 2016)
 
@@ -324,8 +306,6 @@ Key design decisions from the paper that directly apply to our softmax implement
 **Serving (inference):**
 - At serving time, rank by raw dot product `u · v` — no softmax normalisation, no L2 normalisation of embeddings. The paper uses inner product search throughout (training and inference).
 - YouTube uses ANN (approximate nearest neighbor search via MIPS) because their corpus is billions of videos. **Our corpus is ~11k books**, so we compute all 11k dot products exactly. No ANN needed.
-- **Note:** V2 applies `F.normalize` (L2 norm) at the output of both towers before the dot product. This makes dot product = cosine similarity on the unit sphere and stabilizes training with shallow sum pooling. Both training and inference use the same normalized embeddings.
-
 **Shared item ID embedding:**
 - The item ID embedding table is shared between the item tower output and the user history avg pool (we already do this). The paper does the same — a single global video embedding used for both the "what video is this" tower and the "what has the user watched" history representation.
 
@@ -334,7 +314,7 @@ Key design decisions from the paper that directly apply to our softmax implement
 - The final user embedding dimension = the item embedding dimension (they must match for dot product). The softmax weight matrix is shape `(n_books, embedding_dim)` — each row is an item embedding.
 - Out-of-vocabulary items map to a zero embedding (already our behavior for unknown authors).
 
-**Dataset format (V2):** 8-tuple — `(X_genre, X_hist_full, X_hist_liked, X_hist_disliked, X_hist_weighted, X_rats_weighted, timestamp, target_book_idx)`. All history tensors pre-padded to `max_hist` — no per-batch padding overhead. Item features (`genre`, `year`, `author`) looked up from non-persistent registered buffers at training time via `target_book_idx` — not stored in the dataset tensors.
+**Dataset format (PROD):** 5-tuple — `(X_genre, X_history, X_history_ratings, timestamp, target_book_idx)`. `X_history` and `X_history_ratings` are lists of lists (variable length, padded per batch at training time). Item features (`genre`, `year`, `author`) looked up from non-persistent registered buffers at training time via `target_book_idx` — not stored in the dataset tensors.
 
 **Known approximations in the softmax dataset (dataset.py `build_softmax_dataset`):**
 - Genre context is computed correctly from only the rollback context (no future leakage). ✓
