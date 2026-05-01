@@ -522,7 +522,7 @@ def run_canary_eval(model: BookRecommender, fs: FeatureStore,
     ts_max_bin = torch.bucketize(
         torch.tensor([float(fs.timestamp_bins[-1].item())]),
         fs.timestamp_bins, right=False
-    )
+    ).clamp(max=fs.timestamp_num_bins - 1)
 
     with torch.no_grad():
         for user_type in USER_TYPE_TO_FAVORITE_BOOKS:

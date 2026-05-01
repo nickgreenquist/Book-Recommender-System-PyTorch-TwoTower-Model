@@ -440,7 +440,8 @@ def build_softmax_dataset(users: list, fs: FeatureStore, raw_df,
     
     timestamp_t       = torch.bucketize(
         torch.from_numpy(timestamps_raw).float(),
-        fs.timestamp_bins.float(), right=False)
+        fs.timestamp_bins.float(), right=False
+    ).clamp(max=TIMESTAMP_NUM_BINS - 1)
 
     return (X_genre_t, X_hist_full_t, X_hist_liked_t, X_hist_disliked_t, 
             X_hist_weighted_t, X_rats_weighted_t, timestamp_t, target_book_idx_t)

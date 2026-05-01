@@ -19,20 +19,16 @@ import torch.nn.functional as F
 import src.evaluate
 importlib.reload(src.evaluate)
 from src.evaluate import (
-    USER_TYPE_TO_FAVORITE_GENRES,
-    USER_TYPE_TO_WORST_GENRES,
     USER_TYPE_TO_FAVORITE_BOOKS,
     USER_TYPE_TO_LIKED_BOOKS,
     USER_TYPE_TO_SHELF_TAGS,
     VALUE_FAVORITE_BOOK_RATING,
     VALUE_ANCHOR_BOOK_RATING,
-    VALUE_FAVORITE_GENRE_RATING,
 )
 from src.model import BookRecommender
 
 _LIKED_BOOK  = VALUE_FAVORITE_BOOK_RATING   # 2.0
 _ANCHOR_BOOK = VALUE_ANCHOR_BOOK_RATING     # 1.0
-_LIKED_GENRE = VALUE_FAVORITE_GENRE_RATING  # 4.0
 _ANCHORS_PER_TAG = 5
 _COVER_WIDTH = 100
 _COVER_ROW_HEIGHT = 200
@@ -84,7 +80,7 @@ def load_artifacts():
     ts_inference = torch.bucketize(
         torch.tensor([float(fs['timestamp_bins'][-1].item())]),
         fs['timestamp_bins'], right=False,
-    )
+    ).clamp(max=fs['timestamp_num_bins'] - 1)
 
     return model, fs, be, all_ids, all_embs, all_norm, ts_inference
 
@@ -116,12 +112,11 @@ def _get_shelf_anchors(fs, shelf_tags, exclude):
     return anchor_titles
 
 
-def _build_user_embedding(model, fs, liked_titles_with_weights, liked_genres, ts_inference):
+def _build_user_embedding(model, fs, liked_titles_with_weights, ts_inference):
     """
-    Build a combined user embedding from book and genre signals.
+    Build a combined user embedding from book signals.
     liked_titles_with_weights: list of (title, weight) — explicit likes use _LIKED_BOOK,
       shelf anchors use _ANCHOR_BOOK.
-    liked_genres: list of genre name strings (from genres_ordered).
     """
     n_genres = len(fs['genres_ordered'])
     ctx = [0.0] * (2 * n_genres)
@@ -146,28 +141,29 @@ def _build_user_embedding(model, fs, liked_titles_with_weights, liked_genres, ts
             ctx[fs['genre_to_i'][g]]            = avg_r
             ctx[n_genres + fs['genre_to_i'][g]] = frac
 
-    # Explicit genre overrides — stronger signal than book-derived estimates
-    for g in liked_genres:
-        if g in fs['genre_to_i']:
-            ctx[fs['genre_to_i'][g]]            = _LIKED_GENRE
-            ctx[n_genres + fs['genre_to_i'][g]] = 1.0 / max(len(liked_genres), 1)
-
-    # History
+    # History — build quadruple pools matching V2 model signature
     history = [
         (fs['bookId_to_idx'][fs['title_to_bookId'][t]], w)
         for t, w in liked_titles_with_weights
         if t in fs['title_to_bookId'] and fs['title_to_bookId'][t] in fs['bookId_to_idx']
     ]
 
-    if history:
-        hist_idx_t = torch.tensor([[h[0] for h in history]], dtype=torch.long)
-        hist_wts_t = torch.tensor([[h[1] for h in history]], dtype=torch.float)
-    else:
-        hist_idx_t = torch.full((1, 1), model.book_pad_idx, dtype=torch.long)
-        hist_wts_t = torch.zeros(1, 1)
+    pad_idx = model.book_pad_idx
+
+    def to_t(idx_list, dtype=torch.long):
+        if not idx_list:
+            return torch.full((1, 1), pad_idx, dtype=dtype)
+        return torch.tensor([idx_list], dtype=dtype)
+
+    h_full_t     = to_t([h[0] for h in history])
+    h_liked_t    = to_t([h[0] for h in history if h[1] >= 0.5])
+    h_disliked_t = to_t([h[0] for h in history if h[1] <= -0.5])
+    h_weighted_t = to_t([h[0] for h in history])
+    r_weighted_t = to_t([h[1] for h in history], dtype=torch.float)
 
     X_inf = torch.tensor([ctx])
-    return model.user_embedding(X_inf, hist_idx_t, hist_wts_t, ts_inference)
+    return model.user_embedding(X_inf, h_full_t, h_liked_t, h_disliked_t,
+                                h_weighted_t, r_weighted_t, ts_inference)
 
 
 def _cover_url(bid, fs):
@@ -239,7 +235,6 @@ def tab_recommend(model, fs, all_ids, all_embs, ts_inference):
         st.session_state['rec_liked'] = USER_TYPE_TO_FAVORITE_BOOKS[profile]
 
     liked_titles = st.multiselect("Favorite Books", all_titles, key='rec_liked', max_selections=20)
-    liked_genres = []  # derived from book history in _build_user_embedding
 
     with st.expander("Refine by Shelf Tags (optional)"):
         st.caption(
@@ -286,7 +281,7 @@ def tab_recommend(model, fs, all_ids, all_embs, ts_inference):
 
         with torch.no_grad():
             user_emb = _build_user_embedding(
-                model, fs, liked_with_weights, liked_genres, ts_inference,
+                model, fs, liked_with_weights, ts_inference,
             )
 
         if anchor_tag_book_pairs:
@@ -303,7 +298,7 @@ def tab_recommend(model, fs, all_ids, all_embs, ts_inference):
 
 def tab_recommend_examples(model, fs, all_ids, all_embs, ts_inference):
     st.caption("Select a pre-built user profile to see what the model recommends for that taste.")
-    profiles = list(USER_TYPE_TO_FAVORITE_GENRES.keys())
+    profiles = list(USER_TYPE_TO_FAVORITE_BOOKS.keys())
     selected_profile = st.selectbox(
         "Profile",
         options=[None] + profiles,
@@ -314,7 +309,6 @@ def tab_recommend_examples(model, fs, all_ids, all_embs, ts_inference):
     if selected_profile:
         fav_books    = USER_TYPE_TO_FAVORITE_BOOKS[selected_profile]
         liked_books  = USER_TYPE_TO_LIKED_BOOKS.get(selected_profile, [])
-        fav_genres   = USER_TYPE_TO_FAVORITE_GENRES[selected_profile]
         shelf_tags   = USER_TYPE_TO_SHELF_TAGS.get(selected_profile, [])
 
         anchor_titles = _get_shelf_anchors(
@@ -332,7 +326,7 @@ def tab_recommend_examples(model, fs, all_ids, all_embs, ts_inference):
 
         with torch.no_grad():
             user_emb = _build_user_embedding(
-                model, fs, liked_with_weights, fav_genres, ts_inference,
+                model, fs, liked_with_weights, ts_inference,
             )
 
         df = _score_books(user_emb, all_ids, all_embs, fs,
@@ -342,8 +336,6 @@ def tab_recommend_examples(model, fs, all_ids, all_embs, ts_inference):
         st.subheader(f"Recommendations for: {display_name}")
         if fav_books:
             st.caption("Because you like: " + ", ".join(fav_books))
-        if fav_genres:
-            st.caption("Favorite genres: " + ", ".join(fav_genres))
         if anchor_titles:
             st.caption("Shelf anchors: " + ", ".join(anchor_titles))
         _render_results(df)
