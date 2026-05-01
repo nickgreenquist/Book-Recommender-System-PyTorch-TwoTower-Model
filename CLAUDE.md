@@ -179,16 +179,78 @@ Canary users are synthetic — no real read timestamps. All receive `ts_max_bin`
 ## Current Production Model
 
 **Serving checkpoint (deployed):** `saved_models/best_proj_softmax_ipool_20260426_093432.pth`
-Serving artifacts are in `serving/` and deployed to the Streamlit app. This uses the V1 ipool architecture (item tower pooling in user history — superseded by V2).
+Serving artifacts are in `serving/` and deployed to the Streamlit app. This uses the ipool architecture (item tower pooling in user history).
 
-**V2 architecture (in training):** Quadruple shallow ID-embedding pools + user shelf affinity tower. See Model Architecture section above. Retrain required before exporting to serving.
+**V2 experiment (branch `v2`, not promoted):** See "V2 Experiment" section below for full results and reasoning.
 
 **Architecture history (all ✅ implemented and validated):**
 
 1. **Projection MLP** — both towers end with `concat → Linear(256) → ReLU → Linear(128)`. Learns cross-feature interactions (genre × history) that plain concat + dot product cannot express. Hit Rate@10: 10.7% → 13.0% (+21%).
    - Initialization fix (critical): sub-tower linear layers `gain=0.01 → 0.1`, projection layers initialized separately to `gain=1.0`. Without this, dot products collapse to zero at step 0 and never recover.
 
-2. **Item tower pooling** (superseded by V2) — user history pooled over full 128-dim projected item embeddings. Captured shelf+genre+author signals but ~8× slower to train due to shelf MLP being called B×H times per step. Hit Rate@10: 13.0% → 14.0% (+8%). Replaced in V2 by shallow ID-embedding pools + dedicated user shelf affinity tower.
+2. **Item tower pooling (current PROD)** — user history pooled over full 128-dim projected item embeddings. Captured shelf+genre+author signals but ~8× slower to train due to shelf MLP being called B×H times per step. Hit Rate@10: 13.0% → 14.0% (+8%). This is the strongest architecture to date — see V2 experiment for the failed attempt to replace it.
+
+## V2 Experiment (April 2026) — Implemented, Not Promoted
+
+### Goal
+
+Make the user tower more industry-standard by eliminating the 8× training slowdown of ipool. The ipool architecture pools the full projected 128-dim item embedding (including shelf MLP output) over every item in the user's read history — meaning the shelf MLP runs B×H times per training step. The goal was to replace this with fast shallow pools over raw 32-dim ID embeddings, while recovering the lost content signal through a dedicated `user_shelf_affinity_tower` on the user side.
+
+Secondary goals: adopt full softmax (score against all ~11k books per step instead of in-batch negatives only), add popularity debiasing, add L2 normalization, and partition history into four signal types.
+
+### What Was Built
+
+**User tower changes:**
+- Replaced single ipool (128-dim rating-weighted avg pool over item embeddings) with four parallel shallow sum pools over 32-dim ID embeddings: `history_full`, `history_liked`, `history_disliked`, `history_weighted` — each followed by LayerNorm
+- Added `user_shelf_affinity_tower`: pools the user's per-book TF-IDF shelf vectors over read history → 64-dim representation of user shelf taste
+- New user concat: 4×32 + 16 (genre) + 64 (shelf affinity) + 8 (timestamp) = 216-dim → projection MLP → 128-dim
+
+**Training changes:**
+- Full softmax: score against all ~11k books per step (U @ V_all.T), not just in-batch negatives
+- Popularity debiasing: subtract `alpha * log1p(interaction_count)` from positive logit during training; temperature-scaled debiasing at inference
+- CosineAnnealingLR, batch=512, gradient clipping, L2 normalization on both towers
+
+**Dataset changes:**
+- 8-tuple format: `(X_genre, X_hist_full, X_hist_liked, X_hist_disliked, X_hist_weighted, X_rats_weighted, timestamp, target_book_idx)`
+- Item features (genre, year, author) looked up from non-persistent registered buffers at training time — not stored in dataset tensors, reducing dataset RAM ~3×
+
+### Results
+
+Trained to 150k steps. Best canary quality was at the **90k checkpoint** — 150k overfit on niche categories (manga absorbed into fantasy cluster, graphic novel recommendations included non-comics like Dune and The Hobbit).
+
+**Head-to-head canary comparison vs PROD (ipool):**
+
+| Category | PROD (ipool) | V2 (90k) |
+|----------|-------------|----------|
+| Nick (personal) | ✅✅ Outstanding — WWII/American history focus | ⚠️ Good core but self-help bleed |
+| Sci-Fi | ✅✅ Outstanding — Stross, Reynolds, Vinge, Niven | ⚠️ Asimov/Hyperion clustering |
+| Classic | ✅✅ Outstanding — Chekhov, Molière, Balzac, Aristotle | ⚠️ 4/10 Dickens |
+| Mystery | ✅ All mysteries, no bleed | ⚠️ The Shining (horror) bleeds in |
+| Fantasy | ✅ Coldfire Trilogy, Serpentwar, Riftwar | ✅ Good (Dragonlance cluster) |
+| Romance | ✅ Diverse subgenres | ⚠️ Sullivan series cluster |
+| YA | ✅ Gallagher Girls, Leviathan | ⚠️ Gossip Girl heavy |
+| Horror | ✅ Rats, Hell House, Swan Song variety | ⚠️ 5/10 Books of Blood |
+| History | ⚠️ LBJ cluster, historical fiction | ✅ Best period diversity |
+| NonFiction | ✅ Biology/behavioral | ✅ Physics/tech |
+| Economics | ✅ Tight Wall Street focus | ✅ Good |
+| Manga | — (old canary format) | ✅ 10/10 diverse |
+| Children's | ⚠️ Cookbook bleed | ✅ All picture books |
+
+**PROD wins 10 categories, V2 wins 3, 1 tie.** V2 was not promoted to production.
+
+### Why V2 Did Not Beat PROD
+
+The ipool architecture's strength comes from a single architectural property: it pools the **full projected 128-dim item embedding** (genre + shelf + author + year + ID → 128-dim) over every book in the user's read history. This means the user embedding directly inherits the item tower's rich shelf and genre signal for every book the user has read.
+
+V2's `user_shelf_affinity_tower` was designed to replicate this — but it pools TF-IDF shelf vectors directly (sparse float vectors) rather than learned item embeddings. In practice, the shallow 32-dim ID pools don't capture enough content signal to compensate for the richer 128-dim item embedding pools in ipool.
+
+The most striking evidence: PROD's Nick canary recommends Battle Cry of Freedom, Founding Brothers, Flags of Our Fathers, An Army at Dawn — a near-perfect military history profile. V2's Nick recommends Checklist Manifesto, Mindset, Getting Things Done alongside With the Old Breed. PROD's Sci-Fi recommends Singularity Sky, Revelation Space, Accelerando — hard SF deep cuts. V2 gets Asimov clustering.
+
+The shelf signal flowing through item embeddings into the user representation (via ipool) is difficult to replicate with a separate user-side tower operating on raw TF-IDF vectors.
+
+### Code
+
+All V2 code lives on branch `v2`. The `use_item_pool_for_history=True` flag in `get_softmax_config()` re-enables ipool behavior within the V2 codebase, if desired.
 
 ## Future Improvements
 
@@ -219,15 +281,15 @@ Val users are fixed in `features.py` (`VAL_FRACTION=0.10`, `VAL_SPLIT_SEED=42`),
 
 **Results (5,000 val users, corpus ~11k books, random Hit Rate@10 baseline ≈ 0.88%):**
 
-| Metric | MSE | BPR | Softmax | Softmax + Projection | + Item Tower Pool | **V2 (pending)** |
-|---|---|---|---|---|---|---|
-| Hit Rate@10 | 4.7% | 3.5% | 10.7% | 13.0% | 14.0% | **TBD** |
-| Hit Rate@50 | 17.6% | 14.4% | 28.9% | 33.0% | 36.3% | **TBD** |
-| Recall@10 | 0.0069 | 0.0041 | 0.0164 | 0.0241 | 0.0258 | **TBD** |
-| NDCG@10 | 0.0073 | 0.0042 | 0.0189 | 0.0255 | 0.0274 | **TBD** |
-| MRR | 0.024 | 0.016 | 0.053 | 0.064 | 0.067 | **TBD** |
+| Metric | MSE | BPR | Softmax | Softmax + Projection | **+ Item Tower Pool (PROD)** |
+|---|---|---|---|---|---|
+| Hit Rate@10 | 4.7% | 3.5% | 10.7% | 13.0% | **14.0%** |
+| Hit Rate@50 | 17.6% | 14.4% | 28.9% | 33.0% | **36.3%** |
+| Recall@10 | 0.0069 | 0.0041 | 0.0164 | 0.0241 | **0.0258** |
+| NDCG@10 | 0.0073 | 0.0042 | 0.0189 | 0.0255 | **0.0274** |
+| MRR | 0.024 | 0.016 | 0.053 | 0.064 | **0.067** |
 
-V2 baseline to beat: Hit Rate@10 > 14.0%, MRR > 0.067. Update this table after first V2 eval run.
+V2 (quadruple shallow pools + user shelf affinity tower) did not beat these numbers in canary quality. See "V2 Experiment" section. Offline eval (Hit Rate@K / MRR) for V2 was not run — canary comparison was conclusive enough.
 
 **Canary quality highlights (ipool vs proj_softmax):**
 - **Sci-Fi**: Significantly more specific hard SF — Revelation Space, Accelerando, The Mote in God's Eye appear vs generic Honor Harrington. Richer content signal in the user pool captures subgenre distinctions.
