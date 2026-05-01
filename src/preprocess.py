@@ -5,8 +5,7 @@ Outputs data/base_*.parquet.
 Usage:
     python main.py preprocess books         # Step 1: filter books → data/base_books.parquet
     python main.py preprocess interactions  # Step 2: stream interactions → base_interactions_raw + vocab/shelf/ts parquets
-    python main.py preprocess split         # Step 3: split raw interactions → base_ratings_read, base_ratings_labels
-    python main.py preprocess               # Run all steps in order
+    python main.py preprocess               # Run both steps in order
 """
 import gzip
 import json
@@ -24,7 +23,6 @@ MIN_RATINGS_PER_BOOK  = 10_000
 MIN_RATINGS_PER_USER  = 20
 MAX_RATINGS_PER_USER  = 1_000
 MIN_NUM_SHELVES       = 500     # shelf must appear this many times across all corpus books to be kept
-PERCENT_READ_HISTORY  = 0.9    # fraction of each user's ratings used as read history
 
 
 # ── Timestamp parsing ─────────────────────────────────────────────────────────
@@ -277,37 +275,6 @@ def run_interactions(data_dir: str = 'data') -> None:
     print(f"\n✓ Wrote base_interactions_raw, base_vocab, base_book_shelves, base_timestamps  →  {data_dir}/")
 
 
-# ── Step 3: Split ─────────────────────────────────────────────────────────────
-
-def run_split(data_dir: str = 'data') -> None:
-    """
-    Split base_interactions_raw.parquet into read/label sets.
-    Requires base_interactions_raw.parquet from run_interactions().
-    Rewrites base_ratings_read.parquet and base_ratings_labels.parquet.
-    Safe to re-run without re-streaming the gzip.
-    """
-    raw_path = os.path.join(data_dir, 'base_interactions_raw.parquet')
-    if not os.path.exists(raw_path):
-        raise FileNotFoundError(
-            f"{raw_path} not found — run 'python main.py preprocess interactions' first"
-        )
-    books_path = os.path.join(data_dir, 'base_books.parquet')
-    if not os.path.exists(books_path):
-        raise FileNotFoundError(
-            f"{books_path} not found — run 'python main.py preprocess books' first"
-        )
-
-    print("Loading base_interactions_raw.parquet ...")
-    df = pd.read_parquet(raw_path)
-    top_books = pd.read_parquet(books_path, columns=['book_id'])['book_id'].tolist()
-    print(f"  {len(df):,} interactions, {df['user_id'].nunique():,} users")
-
-    print("\n── Splitting user histories ──")
-    read_df, labels_df = _split_user_history(df, top_books)
-
-    read_df.to_parquet(os.path.join(data_dir, 'base_ratings_read.parquet'), index=False)
-    labels_df.to_parquet(os.path.join(data_dir, 'base_ratings_labels.parquet'), index=False)
-    print(f"\n✓ Wrote base_ratings_read, base_ratings_labels  →  {data_dir}/")
 
 
 # ── Vocab building ────────────────────────────────────────────────────────────
@@ -352,52 +319,6 @@ def _build_vocab(top_books: list, books: dict, genres: dict) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
-# ── User history splitting ────────────────────────────────────────────────────
-
-def _split_user_history(df: pd.DataFrame, top_books: list) -> tuple:
-    top_books_set = set(top_books)
-    df = df[df['book_id'].isin(top_books_set)].copy()
-    df = df.sort_values(['user_id', 'timestamp'])
-
-    df_agg = df.groupby('user_id').agg(
-        book_id   = ('book_id',   list),
-        rating    = ('rating',    list),
-        timestamp = ('timestamp', list),
-    ).reset_index()
-
-    read_rows  = []
-    label_rows = []
-    too_few = too_many = 0
-
-    for _, row in tqdm(df_agg.iterrows(), total=len(df_agg), desc="Splitting user histories"):
-        n = len(row['book_id'])
-        if n < MIN_RATINGS_PER_USER:
-            too_few += 1
-            continue
-        if n > MAX_RATINGS_PER_USER:
-            too_many += 1
-            continue
-
-        uid     = row['user_id']
-        split   = int(n * PERCENT_READ_HISTORY)
-        bids    = row['book_id']
-        ratings = row['rating']
-        times   = row['timestamp']
-
-        for i in range(split):
-            read_rows.append({'user_id': uid, 'book_id': bids[i],
-                              'rating': ratings[i], 'timestamp': times[i]})
-        for i in range(split, n):
-            label_rows.append({'user_id': uid, 'book_id': bids[i],
-                               'rating': ratings[i], 'timestamp': times[i]})
-
-    read_df   = pd.DataFrame(read_rows)
-    labels_df = pd.DataFrame(label_rows)
-
-    print(f"  Users kept: {read_df['user_id'].nunique():,}  "
-          f"(skipped too_few={too_few}, too_many={too_many})")
-    print(f"  Read rows: {len(read_df):,}   Label rows: {len(labels_df):,}")
-    return read_df, labels_df
 
 
 # ── Per-book shelf scores helper ─────────────────────────────────────────────
@@ -440,11 +361,7 @@ def run(data_dir: str = 'data', step: str = None) -> None:
         run_books(data_dir)
     elif step == 'interactions':
         run_interactions(data_dir)
-    elif step == 'split':
-        run_split(data_dir)
     else:
         run_books(data_dir)
         print()
         run_interactions(data_dir)
-        print()
-        run_split(data_dir)
