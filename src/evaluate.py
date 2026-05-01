@@ -23,8 +23,6 @@ CANARY_AVG_RAT             = 3.0
 VALUE_FAVORITE_BOOK_RATING = 2.0   # d_rat for a 5-star book (5 - 3 = +2)
 VALUE_ANCHOR_BOOK_RATING   = 1.0   # d_rat for a 4-star book (4 - 3 = +1)
 ANCHORS_PER_TAG            = 5
-POPULARITY_ALPHA_INFERENCE_MULTIPLE = 2.0  # tuning knob in cosine similarity space
-
 # ── Canary user definitions ───────────────────────────────────────────────────
 
 # Genre names must match base_vocab.parquet exactly.
@@ -516,7 +514,6 @@ def _build_user_embedding(model: BookRecommender, fs: FeatureStore, user_type: s
 
 def run_canary_eval(model: BookRecommender, fs: FeatureStore,
                     book_embeddings: dict, all_ids: list, all_embs: torch.Tensor,
-                    popularity_alpha: float = 0.0, temperature: float = None,
                     top_n: int = 10) -> None:
     """Run all canary users and print recommendation tables."""
     model.eval()
@@ -526,13 +523,6 @@ def run_canary_eval(model: BookRecommender, fs: FeatureStore,
         torch.tensor([float(fs.timestamp_bins[-1].item())]),
         fs.timestamp_bins, right=False
     )
-
-    # Popularity bias — scaled by temperature to match raw dot-product space (no /temp at inference)
-    pop_bias = None
-    if popularity_alpha > 0 and temperature is not None and len(fs.book_interaction_counts) > 0:
-        counts   = torch.from_numpy(fs.book_interaction_counts).to(device)
-        pop_bias = (temperature * popularity_alpha * POPULARITY_ALPHA_INFERENCE_MULTIPLE
-                    * torch.log1p(counts))  # (n_books,)
 
     with torch.no_grad():
         for user_type in USER_TYPE_TO_FAVORITE_BOOKS:
@@ -545,8 +535,6 @@ def run_canary_eval(model: BookRecommender, fs: FeatureStore,
             exclude_set   = set(fav_books) | set(liked_books) | set(anchor_titles)
 
             raw_scores = (all_embs @ user_emb.T).squeeze(-1)
-            if pop_bias is not None:
-                raw_scores = raw_scores - pop_bias
             sorted_idx = torch.argsort(raw_scores, descending=True).tolist()
 
             n = 20 if user_type == "Nick's Recommendations" else top_n
@@ -730,8 +718,8 @@ def _resolve_checkpoint(checkpoint_path: str, checkpoint_dir: str):
     if checkpoint_path is not None:
         return checkpoint_path
     candidates = sorted(
-        glob.glob(os.path.join(checkpoint_dir, 'best_full_softmax_4pool_popularity_alpha_*.pth')) +
-        glob.glob(os.path.join(checkpoint_dir, 'full_softmax_4pool_popularity_alpha_*_step_*.pth')) +
+        glob.glob(os.path.join(checkpoint_dir, 'best_full_softmax_4pool_*.pth')) +
+        glob.glob(os.path.join(checkpoint_dir, 'full_softmax_4pool_*_step_*.pth')) +
         glob.glob(os.path.join(checkpoint_dir, 'best_softmax_4pool_*.pth')) +
         glob.glob(os.path.join(checkpoint_dir, 'softmax_4pool_*.pth')),
         key=os.path.getmtime, reverse=True
@@ -814,8 +802,6 @@ def run_canary(data_dir: str = 'data', checkpoint_path: str = None,
     print("Loading book features ...")
     fs = load_book_features(data_dir, version)
     model, cp_config, book_embeddings, all_ids, all_embs, all_norm, all_norm_id, all_norm_shelf, all_norm_genre = _load_model_and_embeddings(cp, fs)
-    alpha = cp_config.get('popularity_alpha', 0.0)
-    temperature = cp_config.get('temperature', 0.5 / cp_config.get('minibatch_size', 512))
 
     os.makedirs('canary_results', exist_ok=True)
     cp_name  = os.path.splitext(os.path.basename(cp))[0]
@@ -825,10 +811,8 @@ def run_canary(data_dir: str = 'data', checkpoint_path: str = None,
         sys.stdout = _Tee(f)
         try:
             print(f"Checkpoint: {cp}")
-            print(f"popularity_alpha={alpha} ({'applied' if alpha > 0 else 'disabled'})  temperature={temperature:.6f}")
             print("\n── Canary user evaluation ──")
-            run_canary_eval(model, fs, book_embeddings, all_ids, all_embs,
-                            popularity_alpha=alpha, temperature=temperature)
+            run_canary_eval(model, fs, book_embeddings, all_ids, all_embs)
         finally:
             sys.stdout = sys.stdout._stdout
 

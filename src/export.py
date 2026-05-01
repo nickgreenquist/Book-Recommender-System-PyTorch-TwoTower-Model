@@ -33,8 +33,8 @@ def run_export(data_dir: str = 'data', checkpoint_path: str = None,
     # ── Resolve checkpoint ────────────────────────────────────────────────────
     if checkpoint_path is None:
         candidates = sorted(
-            glob.glob(os.path.join('saved_models', 'best_full_softmax_4pool_popularity_alpha_*.pth')) +
-            glob.glob(os.path.join('saved_models', 'full_softmax_4pool_popularity_alpha_*_step_*.pth')) +
+            glob.glob(os.path.join('saved_models', 'best_full_softmax_4pool_*.pth')) +
+            glob.glob(os.path.join('saved_models', 'full_softmax_4pool_*_step_*.pth')) +
             glob.glob(os.path.join('saved_models', 'best_softmax_4pool_*.pth')) +
             glob.glob(os.path.join('saved_models', 'softmax_4pool_*.pth')),
             key=os.path.getmtime, reverse=True,
@@ -166,8 +166,6 @@ def run_export(data_dir: str = 'data', checkpoint_path: str = None,
         # Non-persistent buffers — needed at serving time for ipool models
         'book_genre_matrix':  book_genre_matrix,
         'book_year_idx':      book_year_idx,
-        # Per-book popularity counts (for inference-time popularity debiasing)
-        'book_interaction_counts': fs.book_interaction_counts,  # numpy (n_books,) float32
         # Derived constants
         'user_context_size':  fs.user_context_size,
         'timestamp_num_bins': fs.timestamp_num_bins,

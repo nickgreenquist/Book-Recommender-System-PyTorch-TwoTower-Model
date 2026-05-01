@@ -178,7 +178,7 @@ Canary users are synthetic — no real read timestamps. All receive `ts_max_bin`
 
 ## Current Production Model
 
-**Serving checkpoint (deployed):** `saved_models/best_full_softmax_4pool_popularity_alpha_20260501_073113.pth`
+**Serving checkpoint (deployed):** `saved_models/best_full_softmax_4pool_20260501_073113.pth`
 Serving artifacts are in `serving/` and deployed to the Streamlit app. This is the V2 architecture — quadruple shallow pools + user shelf affinity tower + full softmax.
 
 **Previous PROD (ipool):** `saved_models/OLD_PROD_best_proj_softmax_ipool_20260426_093432.pth` — superseded by V2.
@@ -188,7 +188,7 @@ Serving artifacts are in `serving/` and deployed to the Streamlit app. This is t
 1. **Projection MLP** — both towers end with `concat → Linear(256) → ReLU → Linear(128)`. Learns cross-feature interactions (genre × history) that plain concat + dot product cannot express. Hit Rate@10: 10.7% → 13.0% (+21%).
    - Initialization fix (critical): sub-tower linear layers `gain=0.01 → 0.1`, projection layers initialized separately to `gain=1.0`. Without this, dot products collapse to zero at step 0 and never recover.
 
-2. **Item tower pooling (current PROD)** — user history pooled over full 128-dim projected item embeddings. Captured shelf+genre+author signals but ~8× slower to train due to shelf MLP being called B×H times per step. Hit Rate@10: 13.0% → 14.0% (+8%). This is the strongest architecture to date — see V2 experiment for the failed attempt to replace it.
+2. **Item tower pooling** — user history pooled over full 128-dim projected item embeddings. Captured shelf+genre+author signals but ~8× slower to train due to shelf MLP being called B×H times per step. Hit Rate@10: 13.0% → 14.0% (+8%). Superseded by V2 (current PROD) which replaces it with fast shallow pools + user shelf affinity tower.
 
 ## V2 Experiment (May 2026) — Implemented and Promoted to Production ✅
 
@@ -196,7 +196,7 @@ Serving artifacts are in `serving/` and deployed to the Streamlit app. This is t
 
 Make the user tower more industry-standard by eliminating the 8× training slowdown of ipool. The ipool architecture pools the full projected 128-dim item embedding (including shelf MLP output) over every item in the user's read history — meaning the shelf MLP runs B×H times per training step. The goal was to replace this with fast shallow pools over raw 32-dim ID embeddings, while recovering the lost content signal through a dedicated `user_shelf_affinity_tower` on the user side.
 
-Secondary goals: adopt full softmax (score against all ~11k books per step instead of in-batch negatives only), add popularity debiasing, add L2 normalization, and partition history into four signal types.
+Secondary goals: adopt full softmax (score against all ~11k books per step instead of in-batch negatives only), add L2 normalization, and partition history into four signal types.
 
 ### What Was Built
 
@@ -207,7 +207,6 @@ Secondary goals: adopt full softmax (score against all ~11k books per step inste
 
 **Training changes:**
 - Full softmax: score against all ~11k books per step (U @ V_all.T), not just in-batch negatives
-- Popularity debiasing: subtract `alpha * log1p(interaction_count)` from positive logit during training; temperature-scaled debiasing at inference
 - CosineAnnealingLR, batch=512, gradient clipping, L2 normalization on both towers
 
 **Dataset changes:**

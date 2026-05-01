@@ -52,9 +52,6 @@ class FeatureStore:
     val_users:          list = field(default_factory=list)
     user_to_avg_rating: dict = field(default_factory=dict)
 
-    # Per-book interaction counts (for popularity debiasing in full softmax)
-    book_interaction_counts: np.ndarray = field(default_factory=lambda: np.array([], dtype=np.float32))
-
     # Derived constants
     user_context_size:   int          = 0
     timestamp_num_bins:  int          = TIMESTAMP_NUM_BINS
@@ -116,10 +113,6 @@ def load_features(data_dir: str = 'data', version: str = 'v1') -> FeatureStore:
         bookId_to_shelf_context[bid] = list(row['shelf_context'])
         bookId_to_author_idx[bid]    = int(row['author_idx'])
 
-    # ── Per-book interaction counts (popularity debiasing) ───────────────────
-    ic_map = dict(zip(book_feat_df['book_id'], book_feat_df['interaction_count'].astype(np.float32)))
-    book_interaction_counts = np.array([ic_map.get(bid, 0.0) for bid in top_books], dtype=np.float32)
-
     # ── Per-user features (user_id, split, avg_rating) ───────────────────────
     train_users      = user_feat_df[user_feat_df['split'] == 'train']['user_id'].tolist()
     val_users        = user_feat_df[user_feat_df['split'] == 'val']['user_id'].tolist()
@@ -158,7 +151,6 @@ def load_features(data_dir: str = 'data', version: str = 'v1') -> FeatureStore:
         train_users=train_users,
         val_users=val_users,
         user_to_avg_rating=user_to_avg_rating,
-        book_interaction_counts=book_interaction_counts,
         user_context_size=user_context_size,
         timestamp_num_bins=TIMESTAMP_NUM_BINS,
         timestamp_bins=timestamp_bins,
@@ -214,9 +206,6 @@ def load_book_features(data_dir: str = 'data', version: str = 'v1') -> FeatureSt
         bookId_to_shelf_context[bid] = list(row['shelf_context'])
         bookId_to_author_idx[bid]    = int(row['author_idx'])
 
-    ic_map = dict(zip(book_feat_df['book_id'], book_feat_df['interaction_count'].astype(np.float32)))
-    book_interaction_counts = np.array([ic_map.get(bid, 0.0) for bid in top_books], dtype=np.float32)
-
     return FeatureStore(
         top_books=top_books,
         genres_ordered=genres_ordered,
@@ -235,7 +224,6 @@ def load_book_features(data_dir: str = 'data', version: str = 'v1') -> FeatureSt
         bookId_to_genre_context=bookId_to_genre_context,
         bookId_to_shelf_context=bookId_to_shelf_context,
         bookId_to_author_idx=bookId_to_author_idx,
-        book_interaction_counts=book_interaction_counts,
         user_context_size=2 * len(genres_ordered),
         timestamp_num_bins=TIMESTAMP_NUM_BINS,
         timestamp_bins=torch.tensor(np.linspace(

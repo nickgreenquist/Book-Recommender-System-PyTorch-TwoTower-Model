@@ -1,0 +1,507 @@
+Checkpoint: saved_models/OLD_PROD_best_proj_softmax_ipool_20260426_093432.pth
+
+── Canary user evaluation ──
+
+════════════════════════════════════════════════════════════════════════════════════════════════════════
+Nick's Recommendations  |  Likes: —  |  Dislikes: —  |  Shelves: 
+════════════════════════════════════════════════════════════════════════════════════════════════════════
+Favorite Books                                      Recommendations
+────────────────────────────────────────────────────────────────────────────────────────────────────────
+Tales of the South Pacific                          Battle Cry of Freedom
+Martin Eden                                         Founding Brothers: The Revolutionary Generation
+The Silmarillion                                    With the Old Breed: At Peleliu and Okinawa
+Where the Red Fern Grows                            Flags of Our Fathers
+Animal Farm                                         An Army at Dawn: The War in North Africa, 1942-1943 (World War II Liberation Trilogy, #1)
+White Fang                                          The Bully Pulpit: Theodore Roosevelt, William Howard Taft, and the Golden Age of Journalism
+The Call of the Wild                                In Harm's Way: The Sinking of the U.S.S. Indianapolis and the Extraordinary Story of Its Survivors
+Meditations                                         Confederates in the Attic: Dispatches from the Unfinished Civil War
+The Return of the King (The Lord of the Rings, #3)  The Guns of August
+The Two Towers (The Lord of the Rings, #2)          The Nine: Inside the Secret World of the Supreme Court
+The Big Short: Inside the Doomsday Machine          Adrift: Seventy-Six Days Lost at Sea
+The Fellowship of the Ring (The Lord of the Rings, #1)  Mayflower: A Story of Courage, Community, and War
+Flowers for Algernon                                Alexander Hamilton
+Killers of the Flower Moon: The Osage Murders and the Birth of the FBI  Why Evolution Is True
+Einstein: His Life and Universe                     The Rise of Theodore Roosevelt
+Man's Search for Meaning                            A Random Walk Down Wall Street
+Empire of the Summer Moon: Quanah Parker and the Rise and Fall of the Comanches, the Most Powerful Indian Tribe in American History  Moneyball: The Art of Winning an Unfair Game
+Genghis Khan and the Making of the Modern World     Undaunted Courage: The Pioneering First Mission to Explore America's Wild Frontier
+The Martian                                         1491: New Revelations of the Americas Before Columbus
+When Things Fall Apart: Heart Advice for Difficult Times  Salt: A World History
+Stumbling on Happiness                              
+Travels with Charley: In Search of America          
+Stoner                                              
+Centennial                                          
+All Quiet on the Western Front                      
+The Things They Carried                             
+Elon Musk: Tesla, SpaceX, and the Quest for a Fantastic Future  
+Hawaii                                              
+Zero to One: Notes on Startups, or How to Build the Future  
+Bridge to Terabithia                                
+Angle of Repose                                     
+Nothing to Envy: Ordinary Lives in North Korea      
+Noble House (Asian Saga, #5)                        
+Shantaram                                           
+First They Killed My Father: A Daughter of Cambodia Remembers  
+King Rat (Asian Saga, #4)                           
+Tai-Pan (Asian Saga, #2)                            
+Shōgun (Asian Saga, #1)                             
+The Beach                                           
+The Count of Monte Cristo                           
+One Up On Wall Street: How to Use What You Already Know to Make Money in the Market  
+The Everything Store: Jeff Bezos and the Age of Amazon  
+Thinking, Fast and Slow                             
+The Selfish Gene                                    
+The River of Doubt: Theodore Roosevelt's Darkest Journey  
+Steve Jobs                                          
+There are No Children Here: The Story of Two Boys Growing Up in the Other America  
+The Subtle Knife (His Dark Materials, #2)           
+Talent is Overrated: What Really Separates World-Class Performers from Everybody Else  
+East of Eden                                        
+The Perks of Being a Wallflower                     
+A Short History of Nearly Everything                
+The Glass Castle                                    
+From Here to Eternity                               
+The Book Thief                                      
+The Lord of the Rings (The Lord of the Rings, #1-3)  
+Fight Club                                          
+The BFG                                             
+A Storm of Swords (A Song of Ice and Fire, #3)      
+A Game of Thrones (A Song of Ice and Fire, #1)      
+In Cold Blood                                       
+Siddhartha                                          
+A Farewell to Arms                                  
+Of Mice and Men                                     
+The Kite Runner                                     
+The Catcher in the Rye                              
+A Clockwork Orange                                  
+The Hunger Games (The Hunger Games, #1)             
+The Lightning Thief (Percy Jackson and the Olympians, #1)  
+Harry Potter and the Sorcerer's Stone (Harry Potter, #1)  
+
+══════════════════════════════════════════════════════════════════════════════════════════════════
+Mystery Lover  |  Likes: mystery, crime  |  Dislikes: —  |  Shelves: mystery, crime
+══════════════════════════════════════════════════════════════════════════════════════════════════
+Shelf anchors (rating=1.0):
+  + 4:50 from Paddington (Miss Marple, #8)
+  + Clouds of Witness (Lord Peter Wimsey, #2)
+  + A Bone to Pick (Aurora Teagarden, #2)
+  + The Mummy Case (Amelia Peabody, #3)
+  + The Thirteen Problems (Miss Marple, #2)
+  + Sidetracked (Kurt Wallander, #5)
+  + The Ice Princess (Patrik Hedström, #1)
+  + The Lady in the Lake (Philip Marlowe, #4)
+  + Evil Under the Sun (Hercule Poirot, #23)
+  + Police (Harry Hole, #10)
+──────────────────────────────────────────────────────────────────────────────────────────────────
+Favorite Books                                    Recommendations
+──────────────────────────────────────────────────────────────────────────────────────────────────
+Gone Girl                                         Shroud for a Nightingale (Adam Dalgliesh #4)
+The Girl with the Dragon Tattoo (Millennium, #1)  The Private Patient (Adam Dalgliesh #14)
+Big Little Lies                                   Cover Her Face (Adam Dalgliesh #1)
+The Silence of the Lambs  (Hannibal Lecter, #2)   Strong Poison (Lord Peter Wimsey, #6)
+                                                  The Murder on the Links (Hercule Poirot, #2)
+                                                  The Black Tower (Adam Dalgliesh #5)
+                                                  M is for Malice (Kinsey Millhone, #13)
+                                                  Playing for the Ashes (Inspector Lynley, #7)
+                                                  Well-Schooled in Murder (Inspector Lynley, #3)
+                                                  Indemnity Only (V.I. Warshawski, #1)
+
+════════════════════════════════════════════════════════════════════════════════════════════════════════
+Fantasy Lover  |  Likes: fantasy  |  Dislikes: —  |  Shelves: epic-fantasy, world-building
+════════════════════════════════════════════════════════════════════════════════════════════════════════
+Shelf anchors (rating=1.0):
+  + Confessor (Sword of Truth, #11)
+  + Tower Lord (Raven's Shadow, #2)
+  + Assassin's Apprentice (Farseer Trilogy, #1)
+  + Blood of the Fold (Sword of Truth, #3)
+  + Magician: Apprentice (The Riftwar Saga, #1)
+────────────────────────────────────────────────────────────────────────────────────────────────────────
+Favorite Books                                      Recommendations
+────────────────────────────────────────────────────────────────────────────────────────────────────────
+The Name of the Wind (The Kingkiller Chronicle, #1)  Black Sun Rising (The Coldfire Trilogy, #1)
+The Way of Kings (The Stormlight Archive, #1)       Crown of Shadows (The Coldfire Trilogy, #3)
+A Game of Thrones (A Song of Ice and Fire, #1)      Prince of the Blood (Krondor's Sons, #1)
+                                                    Rage of a Demon King (The Serpentwar Saga, #3)
+                                                    Rise of a Merchant Prince (The Serpentwar Saga, #2)
+                                                    The Icewind Dale Trilogy Collector's Edition (Forgotten Realms: Icewind Dale, #1-3; Legend of Drizzt, #4-6)
+                                                    Shards of a Broken Crown (The Serpentwar Saga, #4)
+                                                    Shadow of a Dark Queen (The Serpentwar Saga, #1)
+                                                    Daughter of the Empire (The Empire Trilogy, #1)
+                                                    Wizard's First Rule (Sword of Truth, #1)
+
+════════════════════════════════════════════════════════════════════════════════════════════
+Romance Lover  |  Likes: romance  |  Dislikes: —  |  Shelves: romance, love-story, chick-lit
+════════════════════════════════════════════════════════════════════════════════════════════
+Shelf anchors (rating=1.0):
+  + Getting Rid of Bradley
+  + Key of Light (Key Trilogy, #1)
+  + The Lost Duke of Wyndham (Two Dukes of Wyndham, #1)
+  + What Happens in London (Bevelstoke, #2)
+  + Anyone But You
+  + A Walk to Remember
+  + Love Story (Love Story, #1)
+  + The Sandcastle Girls
+  + The Vow
+  + The Thorn Birds
+  + Mr. Maybe
+  + The Gatecrasher
+  + Four Blondes
+  + Watermelon (Walsh Family, #1)
+  + The Debutante Divorcee
+────────────────────────────────────────────────────────────────────────────────────────────
+Favorite Books                     Recommendations
+────────────────────────────────────────────────────────────────────────────────────────────
+Pride and Prejudice                Annie's Song
+Me Before You (Me Before You, #1)  Manhunting
+The Notebook (The Notebook, #1)    Bet Me
+                                   Smooth Talking Stranger (Travises, #3)
+                                   The Little Lady Agency (The Little Lady Agency, #1)
+                                   Taking Shots (Assassins, #1)
+                                   Simply Irresistible (Chinooks Hockey Team, #1)
+                                   Sugar Daddy (Travises, #1)
+                                   Once and Always (Sequels, #1)
+                                   Maid for Love (Gansett Island Series, #1)
+
+════════════════════════════════════════════════════════════════════════════════════════════════════════
+YA Lover  |  Likes: young-adult  |  Dislikes: —  |  Shelves: young-adult, ya, coming-of-age
+════════════════════════════════════════════════════════════════════════════════════════════════════════
+Shelf anchors (rating=1.0):
+  + Catching Fire (Hunger Games, #2)
+  + Catching Fire (The Hunger Games, #2)
+  + Princess in Waiting (The Princess Diaries, #4)
+  + Stargirl (Stargirl, #1)
+  + The Woman Who Rides Like a Man (Song of the Lioness, #3)
+  + Etiquette & Espionage (Finishing School, #1)
+  + Mosquitoland
+  + How I Live Now
+  + Forever in Blue: The Fourth Summer of the Sisterhood (Sisterhood, #4)
+  + The Iron King (The Iron Fey, #1)
+  + The Yonahlossee Riding Camp for Girls
+  + Aristotle and Dante Discover the Secrets of the Universe (Aristotle and Dante Discover the Secrets of the Universe, #1)
+  + The Universe Versus Alex Woods
+  + Labor Day
+  + The Age of Miracles
+────────────────────────────────────────────────────────────────────────────────────────────────────────
+Favorite Books                                      Recommendations
+────────────────────────────────────────────────────────────────────────────────────────────────────────
+Harry Potter and the Sorcerer's Stone (Harry Potter, #1)  Goddess Boot Camp (Oh. My. Gods., #2)
+The Hunger Games (The Hunger Games, #1)             Being Nikki (Airhead, #2)
+Divergent (Divergent, #1)                           Oh. My. Gods. (Oh. My. Gods., #1)
+                                                    Runaway (Airhead, #3)
+                                                    Unraveling (Unraveling, #1)
+                                                    Secrets of My Hollywood Life (Secrets of My Hollywood Life, #1)
+                                                    I'd Tell You I Love You, But Then I'd Have to Kill You (Gallagher Girls, #1)
+                                                    Behemoth (Leviathan, #2)
+                                                    Alphas (Alphas, #1)
+                                                    Out of Sight, Out of Time (Gallagher Girls, #5)
+
+════════════════════════════════════════════════════════════════════════════════════════════════
+History Lover  |  Likes: history, biography  |  Dislikes: —  |  Shelves: history, historical
+════════════════════════════════════════════════════════════════════════════════════════════════
+Shelf anchors (rating=1.0):
+  + The Twelve Caesars
+  + His Excellency: George Washington
+  + Founding Brothers: The Revolutionary Generation
+  + The Gulag Archipelago 1918-1956
+  + Salt: A World History
+  + Devil's Bride (Cynster, #1)
+  + Whitney, My Love (Westmoreland, #2)
+  + It Happened One Autumn (Wallflowers, #2)
+  + The Lion's Lady (Crown's Spies, #1)
+  + Married By Morning (The Hathaways, #4)
+────────────────────────────────────────────────────────────────────────────────────────────────
+Favorite Books                              Recommendations
+────────────────────────────────────────────────────────────────────────────────────────────────
+The Pillars of the Earth (Kingsbridge, #1)  Mary Queen of Scots
+Wolf Hall (Thomas Cromwell, #1)             When Christ and His Saints Slept  (Henry II and Eleanor of Aquitaine, #1)
+                                            Master of the Senate (The Years of Lyndon Johnson, #3)
+                                            Washington: A Life
+                                            Means of Ascent (The Years of Lyndon Johnson, #2)
+                                            Here be Dragons (Welsh Princes, #1)
+                                            Colonel Roosevelt
+                                            Mornings on Horseback: The Story of an Extraordinary Family, a Vanished Way of Life, and the Unique Child Who Became Theodore Roosevelt
+                                            The Sunne in Splendour
+                                            The Path to Power (The Years of Lyndon Johnson, #1)
+
+════════════════════════════════════════════════════════════════
+Classic Lover  |  Likes: —  |  Dislikes: —  |  Shelves: classics
+════════════════════════════════════════════════════════════════
+Shelf anchors (rating=1.0):
+  + Wuthering Heights
+  + The Prince and the Pauper
+  + Tess of the D'Urbervilles
+  + Lady Chatterley's Lover
+  + Beowulf
+────────────────────────────────────────────────────────────────
+Favorite Books           Recommendations
+────────────────────────────────────────────────────────────────
+Anna Karenina            Uncle Vanya
+Crime and Punishment     Poetics
+Great Expectations       The Nicomachean Ethics
+Moby-Dick or, The Whale  Utopia
+                         Bartleby the Scrivener
+                         Confessions
+                         Gargantua and Pantagruel
+                         The Three Sisters
+                         Eugénie Grandet
+                         The Misanthrope
+
+═════════════════════════════════════════════════════════════
+Horror Lover  |  Likes: —  |  Dislikes: —  |  Shelves: horror
+═════════════════════════════════════════════════════════════
+Shelf anchors (rating=1.0):
+  + Ghost Story
+  + The Case of Charles Dexter Ward
+  + Thinner
+  + Cell
+  + The Fall (The Strain Trilogy, #2)
+─────────────────────────────────────────────────────────────
+Favorite Books              Recommendations
+─────────────────────────────────────────────────────────────
+The Shining                 The Rats (Rats, #1)
+Pet Sematary                The Stand: Soul Survivors
+The Exorcist                Hell House
+House of Leaves             The Keep (Adversary Cycle, #1)
+The Haunting of Hill House  The Postman
+                            Cabal
+                            The Fog
+                            Swan Song
+                            The Damnation Game
+                            The Bachman Books
+
+═════════════════════════════════════════════════════════════════════════════════════════════════
+Sci-Fi Lover  |  Likes: —  |  Dislikes: —  |  Shelves: science-fiction, sci-fi
+═════════════════════════════════════════════════════════════════════════════════════════════════
+Shelf anchors (rating=1.0):
+  + The City and the Stars
+  + The Caves of Steel (Robot #1)
+  + Chasm City
+  + A Fire Upon the Deep (Zones of Thought, #1)
+  + Field of Dishonor (Honor Harrington, #4)
+  + Ubik
+  + The Stars My Destination
+  + Do Androids Dream of Electric Sheep?
+  + I, Robot (Robot #0.1)
+  + Children of Dune (Dune Chronicles #3)
+─────────────────────────────────────────────────────────────────────────────────────────────────
+Favorite Books                                      Recommendations
+─────────────────────────────────────────────────────────────────────────────────────────────────
+Hyperion (Hyperion Cantos, #1)                      Singularity Sky (Eschaton, #1)
+The Hitchhiker's Guide to the Galaxy (Hitchhiker's Guide, #1)  Revelation Space (Revelation Space, #1)
+                                                    Accelerando
+                                                    Spin (Spin, #1)
+                                                    The Mote in God's Eye
+                                                    Rainbows End
+                                                    The Neutronium Alchemist (Night's Dawn, #2)
+                                                    Pandora's Star
+                                                    The Reality Dysfunction (Night's Dawn, #1)
+                                                    Redemption Ark
+
+═══════════════════════════════════════════════════════════════════════════════════════════
+NonFiction Lover  |  Likes: non-fiction  |  Dislikes: —  |  Shelves: non-fiction
+═══════════════════════════════════════════════════════════════════════════════════════════
+Shelf anchors (rating=1.0):
+  + A Brief History of Time
+  + Very Good Lives: The Fringe Benefits of Failure and the Importance of Imagination
+  + Gulp: Adventures on the Alimentary Canal
+  + Stupid White Men
+  + Hyperspace
+───────────────────────────────────────────────────────────────────────────────────────────
+Favorite Books                         Recommendations
+───────────────────────────────────────────────────────────────────────────────────────────
+Sapiens: A Brief History of Humankind  Bad Science
+Thinking, Fast and Slow                Why Evolution Is True
+                                       The Magic of Reality: How We Know What's Really True
+                                       Mistakes Were Made (But Not by Me): Why We Justify Foolish Beliefs, Bad Decisions, and Hurtful Acts
+                                       Your Inner Fish: A Journey into the 3.5-Billion-Year History of the Human Body
+                                       Parallel Worlds: A Journey Through Creation, Higher Dimensions, and the Future of the Cosmos
+                                       The Red Queen: Sex and the Evolution of Human Nature
+                                       Predictably Irrational: The Hidden Forces That Shape Our Decisions
+                                       The Blind Watchmaker: Why the Evidence of Evolution Reveals a Universe Without Design
+                                       The Blank Slate: The Modern Denial of Human Nature
+
+═════════════════════════════════════════════════════════════════════════════════════════
+Economics Lover  |  Likes: —  |  Dislikes: —  |  Shelves: economics
+═════════════════════════════════════════════════════════════════════════════════════════
+Shelf anchors (rating=1.0):
+  + The Road to Serfdom
+  + The Undercover Economist
+  + The Undoing Project: A Friendship That Changed Our Minds
+  + SuperFreakonomics: Global Cooling, Patriotic Prostitutes And Why Suicide Bombers Should Buy Life Insurance
+  + Boomerang: Travels in the New Third World
+─────────────────────────────────────────────────────────────────────────────────────────
+Favorite Books                       Recommendations
+─────────────────────────────────────────────────────────────────────────────────────────
+The Intelligent Investor             A Random Walk Down Wall Street
+The Wealth of Nations                One Up On Wall Street: How to Use What You Already Know to Make Money in the Market
+Capital in the Twenty-First Century  When Genius Failed: The Rise and Fall of Long-Term Capital Management
+                                     The Big Short: Inside the Doomsday Machine
+                                     The Smartest Guys in the Room: The Amazing Rise and Scandalous Fall of Enron
+                                     The Wisdom of Crowds
+                                     Antifragile: Things That Gain from Disorder
+                                     Fooled by Randomness: The Hidden Role of Chance in Life and in the Markets
+                                     Flash Boys: A Wall Street Revolt
+                                     Liar's Poker
+
+════════════════════════════════════════════════════════════════════════════════════════════════════════
+Philosophy & Existentialist Thinker  |  Likes: —  |  Dislikes: —  |  Shelves: philosophy, existentialism
+════════════════════════════════════════════════════════════════════════════════════════════════════════
+Shelf anchors (rating=1.0):
+  + Critique of Pure Reason
+  + Discourse on Method
+  + Poetics
+  + Politics
+  + Civilization and Its Discontents
+  + Being and Time
+  + Nausea
+  + The Fall
+  + The Plague
+  + Notes from Underground
+────────────────────────────────────────────────────────────────────────────────────────────────────────
+Favorite Books                         Recommendations
+────────────────────────────────────────────────────────────────────────────────────────────────────────
+The Republic                           Fear and Trembling
+The Stranger                           Tractatus Logico-Philosophicus
+Thus Spoke Zarathustra                 On the Genealogy of Morals/Ecce Homo
+The Myth of Sisyphus and Other Essays  Metaphysics
+Meditations                            Being and Nothingness
+                                       Apology
+                                       Five Dialogues: Euthyphro, Apology, Crito, Meno, Phaedo
+                                       The Nicomachean Ethics
+                                       A History of Western Philosophy
+                                       An Enquiry Concerning Human Understanding
+
+═══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+Graphic Novel/Comic Lover  |  Likes: comics, graphic  |  Dislikes: —  |  Shelves: graphic-novels, comics, graphic-novel
+═══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+Shelf anchors (rating=1.0):
+  + The Hard Goodbye (Sin City #1)
+  + Preacher, Volume 7: Salvation
+  + That Yellow Bastard (Sin City #4)
+  + Black Hole
+  + Preacher, Volume 9: Alamo
+  + Batman: The Black Mirror
+  + Tintin in the Land of the Soviets (Tintin #1)
+  + The League of Extraordinary Gentlemen, Vol. 2
+  + Marvels
+  + House of M
+  + Friends With Boys
+  + Fables, Vol. 12: The Dark Ages
+  + Preacher, Volume 3: Proud Americans
+  + Fables, Vol. 6: Homelands
+  + Chew, Vol. 2: International Flavor
+───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+Favorite Books                                      Recommendations
+───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+Watchmen                                            Hellboy, Vol. 2: Wake the Devil (Hellboy, #2)
+Saga, Vol. 1 (Saga, #1)                             Superman: Whatever Happened to the Man of Tomorrow?
+Maus I: A Survivor's Tale: My Father Bleeds History (Maus, #1)  Justice, Volume 1
+                                                    Batman: Hush, Vol. 1
+                                                    Hellboy, Vol. 3: The Chained Coffin and Others (Hellboy, #3)
+                                                    All-Star Superman, Vol. 2
+                                                    Batman: Knightfall, Vol. 1: Broken Bat
+                                                    Hellblazer: Original Sins
+                                                    Identity Crisis
+                                                    Batman: Whatever Happened to the Caped Crusader?
+
+════════════════════════════════════════════════════════════════════════════════════════════════════════
+Manga Lover  |  Likes: —  |  Dislikes: —  |  Shelves: shonen
+════════════════════════════════════════════════════════════════════════════════════════════════════════
+Shelf anchors (rating=1.0):
+  + Fullmetal Alchemist, Vol. 2 (Fullmetal Alchemist, #2)
+  + Death Note, Vol. 9: Contact (Death Note, #9)
+  + Bleach, Volume 02
+  + Naruto, Vol. 03: Bridge of Courage (Naruto, #3)
+  + Fullmetal Alchemist, Vol. 5 (Fullmetal Alchemist, #5)
+────────────────────────────────────────────────────────────────────────────────────────────────────────
+Favorite Books                                      Recommendations
+────────────────────────────────────────────────────────────────────────────────────────────────────────
+Fullmetal Alchemist, Vol. 1 (Fullmetal Alchemist, #1)  Bleach, Volume 03
+Death Note, Vol. 2: Confluence (Death Note, #2)     Bleach, Volume 15
+Naruto, Vol. 01: The Tests of the Ninja (Naruto, #1)  Avatar: The Last Airbender (The Art of the Animated Series)
+Bleach, Volume 01                                   Naruto, Vol. 05: Exam Hell (Naruto, #5)
+Hunter x Hunter, Vol. 01 (Hunter x Hunter, #1)      Blue Exorcist, Vol. 1  (Blue Exorcist, #1)
+One Piece, Volume 01: Romance Dawn (One Piece, #1)  Soul Eater, Vol. 01 (Soul Eater, #1)
+                                                    Maximum Ride, Vol. 1 (Maximum Ride: The Manga, #1)
+                                                    Berserk, Vol. 1 (Berserk, #1)
+                                                    NARUTO -ナルト- 巻ノ四十三
+                                                    Deadman Wonderland, Volume 1 (Deadman Wonderland, #1)
+
+═════════════════════════════════════════════════════════════════════════════════════════════════
+Religion Book Reader  |  Likes: —  |  Dislikes: —  |  Shelves: religion
+═════════════════════════════════════════════════════════════════════════════════════════════════
+Shelf anchors (rating=1.0):
+  + The Qur'an / القرآن الكريم
+  + A History of God: The 4,000-Year Quest of Judaism, Christianity, and Islam
+  + The Case for Christ
+  + Holy Bible: King James Version
+  + Zealot: The Life and Times of Jesus of Nazareth
+─────────────────────────────────────────────────────────────────────────────────────────────────
+Favorite Books                               Recommendations
+─────────────────────────────────────────────────────────────────────────────────────────────────
+Holy Bible: New International Version        Miracles
+Crazy Love: Overwhelmed by a Relentless God  Celebration of Discipline: The Path to Spiritual Growth
+The Red Tent                                 The Case for Faith: A Journalist Investigates the Toughest Objections to Christianity
+Siddhartha                                   Confessions
+الرحيق المختوم                               A Grief Observed
+Orthodoxy                                    The Abolition of Man
+                                             The Imitation of Christ
+                                             The Problem of Pain
+                                             Velvet Elvis: Repainting the Christian Faith
+                                             Living Buddha, Living Christ
+
+═══════════════════════════════════════════════════════════════════════════════════════════
+Poetry Lover  |  Likes: poetry  |  Dislikes: —  |  Shelves: poetry
+═══════════════════════════════════════════════════════════════════════════════════════════
+Shelf anchors (rating=1.0):
+  + Les Fleurs du Mal
+  + The Waste Land
+  + The Waste Land and Other Poems
+  + The Faerie Queene
+  + Metamorphoses
+───────────────────────────────────────────────────────────────────────────────────────────
+Favorite Books                         Recommendations
+───────────────────────────────────────────────────────────────────────────────────────────
+Leaves of Grass                        The Poetry of Pablo Neruda
+The Complete Poems of Emily Dickinson  Four Quartets
+The Essential Rumi                     100 Love Sonnets
+Milk and Honey                         The Collected Poems of W.B. Yeats
+                                       Songs of Innocence and of Experience
+                                       The Complete Poems
+                                       Shakespeare's Sonnets
+                                       100 Selected Poems
+                                       Collected Poems
+                                       The Love Song of J. Alfred Prufrock and Other Poems
+
+═══════════════════════════════════════════════════════════════════════════════════════════════════════════
+Children's Book Lover  |  Likes: children  |  Dislikes: —  |  Shelves: childrens, children-s, picture-books
+═══════════════════════════════════════════════════════════════════════════════════════════════════════════
+Shelf anchors (rating=1.0):
+  + Frosty the Snowman (Frosty the Snowman)
+  + The Wonderful Wizard of Oz (Oz, #1)
+  + The Tale of Mrs. Tiggy-Winkle
+  + Little Bear
+  + The 500 Hats of Bartholomew Cubbins
+  + The Foot Book: Dr. Seuss's Wacky Book of Opposites
+  + The Cat in the Hat Comes Back
+  + Falling Up
+  + The Little Engine That Could
+  + The Lorax
+  + This is Not My Hat
+  + I Want My Hat Back
+  + The Pigeon Finds a Hot Dog!
+  + The Book with No Pictures
+  + In the Night Kitchen
+───────────────────────────────────────────────────────────────────────────────────────────────────────────
+Favorite Books             Recommendations
+───────────────────────────────────────────────────────────────────────────────────────────────────────────
+Where the Wild Things Are  If You Give a Cat a Cupcake
+The Giving Tree            Big Nate on a Roll (Big Nate Novels, #3)
+Where the Sidewalk Ends    Queen of the World! (Babymouse, #1)
+Matilda                    The Dot
+                           Strega Nona
+                           Zen Shorts
+                           The Paper Bag Princess
+                           Don't Let the Pigeon Stay Up Late!
+                           The Pigeon Wants a Puppy!
+                           Deceptively Delicious: Simple Secrets to Get Your Kids Eating Good Food

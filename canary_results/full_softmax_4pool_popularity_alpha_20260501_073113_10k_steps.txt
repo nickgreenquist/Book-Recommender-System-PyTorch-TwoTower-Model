@@ -1,0 +1,508 @@
+Checkpoint: saved_models/best_full_softmax_4pool_popularity_alpha_20260501_073113.pth
+popularity_alpha=0.0 (disabled)  temperature=0.100000
+
+── Canary user evaluation ──
+
+════════════════════════════════════════════════════════════════════════════════════════════════════════
+Nick's Recommendations  |  Shelves: 
+════════════════════════════════════════════════════════════════════════════════════════════════════════
+Favorite Books                                      Recommendations
+────────────────────────────────────────────────────────────────────────────────────────────────────────
+Tales of the South Pacific                          Guns, Germs, and Steel: The Fates of Human Societies
+Martin Eden                                         Into the Wild
+The Silmarillion                                    Freakonomics: A Rogue Economist Explores the Hidden Side of Everything (Freakonomics, #1)
+Where the Red Fern Grows                            Born to Run: A Hidden Tribe, Superathletes, and the Greatest Race the World Has Never Seen
+Animal Farm                                         A Walk in the Woods
+White Fang                                          Quiet: The Power of Introverts in a World That Can't Stop Talking
+The Call of the Wild                                The God Delusion
+Meditations                                         1984
+The Return of the King (The Lord of the Rings, #3)  1776
+The Two Towers (The Lord of the Rings, #2)          A People's History of the United States
+The Big Short: Inside the Doomsday Machine          Atlas Shrugged
+The Fellowship of the Ring (The Lord of the Rings, #1)  Surely You're Joking, Mr. Feynman!: Adventures of a Curious Character
+Flowers for Algernon                                god is Not Great: How Religion Poisons Everything
+Killers of the Flower Moon: The Osage Murders and the Birth of the FBI  Into Thin Air: A Personal Account of the Mount Everest Disaster
+Einstein: His Life and Universe                     The Prince
+Man's Search for Meaning                            The Lost City of Z: A Tale of Deadly Obsession in the Amazon
+Empire of the Summer Moon: Quanah Parker and the Rise and Fall of the Comanches, the Most Powerful Indian Tribe in American History  Team of Rivals: The Political Genius of Abraham Lincoln
+Genghis Khan and the Making of the Modern World     Zen and the Art of Motorcycle Maintenance: An Inquiry Into Values
+The Martian                                         The Fountainhead
+When Things Fall Apart: Heart Advice for Difficult Times  John Adams
+Stumbling on Happiness                              
+Travels with Charley: In Search of America          
+Stoner                                              
+Centennial                                          
+All Quiet on the Western Front                      
+The Things They Carried                             
+Elon Musk: Tesla, SpaceX, and the Quest for a Fantastic Future  
+Hawaii                                              
+Zero to One: Notes on Startups, or How to Build the Future  
+Bridge to Terabithia                                
+Angle of Repose                                     
+Nothing to Envy: Ordinary Lives in North Korea      
+Noble House (Asian Saga, #5)                        
+Shantaram                                           
+First They Killed My Father: A Daughter of Cambodia Remembers  
+King Rat (Asian Saga, #4)                           
+Tai-Pan (Asian Saga, #2)                            
+Shōgun (Asian Saga, #1)                             
+The Beach                                           
+The Count of Monte Cristo                           
+One Up On Wall Street: How to Use What You Already Know to Make Money in the Market  
+The Everything Store: Jeff Bezos and the Age of Amazon  
+Thinking, Fast and Slow                             
+The Selfish Gene                                    
+The River of Doubt: Theodore Roosevelt's Darkest Journey  
+Steve Jobs                                          
+There are No Children Here: The Story of Two Boys Growing Up in the Other America  
+The Subtle Knife (His Dark Materials, #2)           
+Talent is Overrated: What Really Separates World-Class Performers from Everybody Else  
+East of Eden                                        
+The Perks of Being a Wallflower                     
+A Short History of Nearly Everything                
+The Glass Castle                                    
+From Here to Eternity                               
+The Book Thief                                      
+The Lord of the Rings (The Lord of the Rings, #1-3)  
+Fight Club                                          
+The BFG                                             
+A Storm of Swords (A Song of Ice and Fire, #3)      
+A Game of Thrones (A Song of Ice and Fire, #1)      
+In Cold Blood                                       
+Siddhartha                                          
+A Farewell to Arms                                  
+Of Mice and Men                                     
+The Kite Runner                                     
+The Catcher in the Rye                              
+A Clockwork Orange                                  
+The Hunger Games (The Hunger Games, #1)             
+The Lightning Thief (Percy Jackson and the Olympians, #1)  
+Harry Potter and the Sorcerer's Stone (Harry Potter, #1)  
+
+══════════════════════════════════════════════════════════════════════════════════════════════
+Mystery Lover  |  Shelves: mystery, crime
+══════════════════════════════════════════════════════════════════════════════════════════════
+Shelf anchors (rating=1.0):
+  + 4:50 from Paddington (Miss Marple, #8)
+  + Double Shot (A Goldy Bear Culinary Mystery, #12)
+  + Clouds of Witness (Lord Peter Wimsey, #2)
+  + A Bone to Pick (Aurora Teagarden, #2)
+  + The Mummy Case (Amelia Peabody, #3)
+  + Black and Blue (Inspector Rebus, #8)
+  + Sidetracked (Kurt Wallander, #5)
+  + The Ice Princess (Patrik Hedström, #1)
+  + The Big Nowhere (L.A. Quartet, #2)
+  + The Lady in the Lake (Philip Marlowe, #4)
+──────────────────────────────────────────────────────────────────────────────────────────────
+Favorite Books                                    Recommendations
+──────────────────────────────────────────────────────────────────────────────────────────────
+Gone Girl                                         Faithful Place (Dublin Murder Squad, #3)
+The Girl with the Dragon Tattoo (Millennium, #1)  The Silkworm (Cormoran Strike, #2)
+Big Little Lies                                   Dark Places
+The Silence of the Lambs  (Hannibal Lecter, #2)   The Cuckoo's Calling (Cormoran Strike, #1)
+                                                  Broken Harbour (Dublin Murder Squad, #4)
+                                                  The Lewis Man (The Lewis Trilogy, #2)
+                                                  Now You See Me (Lacey Flint, #1)
+                                                  The Girl on the Train
+                                                  Faceless Killers (Kurt Wallander, #1)
+                                                  The Likeness (Dublin Murder Squad, #2)
+
+════════════════════════════════════════════════════════════════════════════════════════════════════════
+Fantasy Lover  |  Shelves: epic-fantasy, world-building
+════════════════════════════════════════════════════════════════════════════════════════════════════════
+Shelf anchors (rating=1.0):
+  + Confessor (Sword of Truth, #11)
+  + Tower Lord (Raven's Shadow, #2)
+  + Assassin's Apprentice (Farseer Trilogy, #1)
+  + Magician: Apprentice (The Riftwar Saga, #1)
+  + Blood of the Fold (Sword of Truth, #3)
+────────────────────────────────────────────────────────────────────────────────────────────────────────
+Favorite Books                                      Recommendations
+────────────────────────────────────────────────────────────────────────────────────────────────────────
+The Name of the Wind (The Kingkiller Chronicle, #1)  Fool's Fate (Tawny Man, #3)
+The Way of Kings (The Stormlight Archive, #1)       Assassin's Quest (Farseer Trilogy, #3)
+A Game of Thrones (A Song of Ice and Fire, #1)      The Blacksmith's Son (Mageborn, #1)
+                                                    The Way of Shadows (Night Angel, #1)
+                                                    Royal Assassin (Farseer Trilogy, #2)
+                                                    Shadow's Edge (Night Angel, #2)
+                                                    Golden Fool (Tawny Man, #2)
+                                                    The Wise Man's Fear (The Kingkiller Chronicle, #2)
+                                                    Fool's Errand (Tawny Man, #1)
+                                                    The Black Prism (Lightbringer, #1)
+
+═══════════════════════════════════════════════════════════════════════════════════════
+Romance Lover  |  Shelves: romance, love-story, chick-lit
+═══════════════════════════════════════════════════════════════════════════════════════
+Shelf anchors (rating=1.0):
+  + Getting Rid of Bradley
+  + The MacGregors: Alan & Grant (The MacGregors, #3-4)
+  + Velvet Angel (Velvet Montgomery Annuals Quadrilogy #4)
+  + Key of Light (Key Trilogy, #1)
+  + The Lost Duke of Wyndham (Two Dukes of Wyndham, #1)
+  + A Walk to Remember
+  + Love Story (Love Story, #1)
+  + The Sandcastle Girls
+  + The Vow
+  + The Thorn Birds
+  + Mr. Maybe
+  + Four Blondes
+  + The Gatecrasher
+  + Watermelon (Walsh Family, #1)
+  + The Debutante Divorcee
+───────────────────────────────────────────────────────────────────────────────────────
+Favorite Books                     Recommendations
+───────────────────────────────────────────────────────────────────────────────────────
+Pride and Prejudice                Reflected in You (Crossfire, #2)
+Me Before You (Me Before You, #1)  Bared to You (Crossfire, #1)
+The Notebook (The Notebook, #1)    Something Blue (Darcy & Rachel, #2)
+                                   Fifty Shades Darker (Fifty Shades, #2)
+                                   Something Borrowed (Darcy & Rachel, #1)
+                                   Vision in White (Bride Quartet, #1)
+                                   The Marriage Bargain (Marriage to a Billionaire, #1)
+                                   Love the One You're With
+                                   Fifty Shades Freed (Fifty Shades, #3)
+                                   Dear John
+
+════════════════════════════════════════════════════════════════════════════════════════════════════════
+YA Lover  |  Shelves: young-adult, ya, coming-of-age
+════════════════════════════════════════════════════════════════════════════════════════════════════════
+Shelf anchors (rating=1.0):
+  + Princess in Waiting (The Princess Diaries, #4)
+  + Catching Fire (Hunger Games, #2)
+  + Catching Fire (The Hunger Games, #2)
+  + En llamas (Los juegos del hambre, #2)
+  + Stargirl (Stargirl, #1)
+  + So Yesterday
+  + Etiquette & Espionage (Finishing School, #1)
+  + Mosquitoland
+  + How I Live Now
+  + The Boy Book: A Study of Habits and Behaviors, Plus Techniques for Taming Them (Ruby Oliver, #2)
+  + The Yonahlossee Riding Camp for Girls
+  + Aristotle and Dante Discover the Secrets of the Universe (Aristotle and Dante Discover the Secrets of the Universe, #1)
+  + The Universe Versus Alex Woods
+  + Labor Day
+  + The Age of Miracles
+────────────────────────────────────────────────────────────────────────────────────────────────────────
+Favorite Books                                      Recommendations
+────────────────────────────────────────────────────────────────────────────────────────────────────────
+Harry Potter and the Sorcerer's Stone (Harry Potter, #1)  Fangirl
+The Hunger Games (The Hunger Games, #1)             Anna and the French Kiss (Anna and the French Kiss, #1)
+Divergent (Divergent, #1)                           Attachments
+                                                    Eleanor & Park
+                                                    To All the Boys I've Loved Before (To All the Boys I've Loved Before, #1)
+                                                    We Were Liars
+                                                    The Selection (The Selection, #1)
+                                                    Lola and the Boy Next Door (Anna and the French Kiss, #2)
+                                                    Saint Anything
+                                                    Landline
+
+════════════════════════════════════════════════════════════════════════════════════════════════
+History Lover  |  Shelves: history
+════════════════════════════════════════════════════════════════════════════════════════════════
+Shelf anchors (rating=1.0):
+  + The Decline and Fall of the Roman Empire
+  + Inside the Third Reich
+  + A Bright Shining Lie: John Paul Vann and America in Vietnam
+  + Henry VIII: The King and His Court
+  + The Twelve Caesars
+────────────────────────────────────────────────────────────────────────────────────────────────
+Favorite Books                              Recommendations
+────────────────────────────────────────────────────────────────────────────────────────────────
+The Pillars of the Earth (Kingsbridge, #1)  The Rise and Fall of the Third Reich: A History of Nazi Germany
+Wolf Hall (Thomas Cromwell, #1)             A Distant Mirror:  The Calamitous 14th Century
+                                            The Guns of August
+                                            John Adams
+                                            The Six Wives of Henry VIII
+                                            Fall of Giants (The Century Trilogy, #1)
+                                            Longitude: The True Story of a Lone Genius Who Solved the Greatest Scientific Problem of His Time
+                                            The Agony and the Ecstasy
+                                            Bury My Heart at Wounded Knee: An Indian History of the American West
+                                            Eleanor of Aquitaine: A Life
+
+═════════════════════════════════════════════════════════════════════════════
+Classic Lover  |  Shelves: classics
+═════════════════════════════════════════════════════════════════════════════
+Shelf anchors (rating=1.0):
+  + Wuthering Heights
+  + The Prince and the Pauper
+  + Tess of the D'Urbervilles
+  + The Histories
+  + Beowulf
+─────────────────────────────────────────────────────────────────────────────
+Favorite Books           Recommendations
+─────────────────────────────────────────────────────────────────────────────
+Anna Karenina            Doctor Zhivago
+Crime and Punishment     War and Peace
+Great Expectations       The Brothers Karamazov
+Moby-Dick or, The Whale  The Three Musketeers (The D'Artagnan Romances, #1)
+                         Madame Bovary
+                         Les Misérables
+                         The Hunchback of Notre-Dame
+                         The Prince
+                         Uncle Tom's Cabin
+                         Candide
+
+═════════════════════════════════════════════════
+Horror Lover  |  Shelves: horror
+═════════════════════════════════════════════════
+Shelf anchors (rating=1.0):
+  + Ghost Story
+  + The Case of Charles Dexter Ward
+  + Thinner
+  + Cell
+  + Mister B. Gone
+─────────────────────────────────────────────────
+Favorite Books              Recommendations
+─────────────────────────────────────────────────
+The Shining                 Firestarter
+Pet Sematary                'Salem's Lot
+The Exorcist                Salem's Lot
+House of Leaves             Misery
+The Haunting of Hill House  Cujo
+                            Christine
+                            Bag of Bones
+                            Full Dark, No Stars
+                            Insomnia
+                            The Dead Zone
+
+════════════════════════════════════════════════════════════════════════════════════════════════
+Sci-Fi Lover  |  Shelves: science-fiction, sci-fi
+════════════════════════════════════════════════════════════════════════════════════════════════
+Shelf anchors (rating=1.0):
+  + The Caves of Steel (Robot #1)
+  + The City and the Stars
+  + Field of Dishonor (Honor Harrington, #4)
+  + A Fire Upon the Deep (Zones of Thought, #1)
+  + Chasm City
+  + Ubik
+  + The Girl Who Heard Dragons (Pern Publication Order #8.5)
+  + The Stars My Destination
+  + Do Androids Dream of Electric Sheep?
+  + I, Robot (Robot #0.1)
+────────────────────────────────────────────────────────────────────────────────────────────────
+Favorite Books                                      Recommendations
+────────────────────────────────────────────────────────────────────────────────────────────────
+Hyperion (Hyperion Cantos, #1)                      Second Foundation (Foundation #3)
+The Hitchhiker's Guide to the Galaxy (Hitchhiker's Guide, #1)  The Forever War (The Forever War, #1)
+                                                    Foundation and Empire (Foundation #2)
+                                                    Old Man's War (Old Man's War, #1)
+                                                    Ringworld (Ringworld, #1)
+                                                    Starship Troopers
+                                                    Foundation (Foundation #1)
+                                                    The Fall of Hyperion (Hyperion Cantos, #2)
+                                                    The Gods Themselves
+                                                    Dune (Dune Chronicles #1)
+
+═══════════════════════════════════════════════════════════════════════════════════════════
+NonFiction Lover  |  Shelves: non-fiction
+═══════════════════════════════════════════════════════════════════════════════════════════
+Shelf anchors (rating=1.0):
+  + A Brief History of Time
+  + Very Good Lives: The Fringe Benefits of Failure and the Importance of Imagination
+  + Hyperspace
+  + Gulp: Adventures on the Alimentary Canal
+  + Krakatoa: The Day the World Exploded
+───────────────────────────────────────────────────────────────────────────────────────────
+Favorite Books                         Recommendations
+───────────────────────────────────────────────────────────────────────────────────────────
+Sapiens: A Brief History of Humankind  Freakonomics: A Rogue Economist Explores the Hidden Side of Everything (Freakonomics, #1)
+Thinking, Fast and Slow                Moonwalking with Einstein: The Art and Science of Remembering Everything
+                                       The Tipping Point: How Little Things Can Make a Big Difference
+                                       Outliers: The Story of Success
+                                       Guns, Germs, and Steel: The Fates of Human Societies
+                                       David and Goliath: Underdogs, Misfits, and the Art of Battling Giants
+                                       Packing for Mars: The Curious Science of Life in the Void
+                                       The Power of Habit: Why We Do What We Do in Life and Business
+                                       Surely You're Joking, Mr. Feynman!: Adventures of a Curious Character
+                                       What If?: Serious Scientific Answers to Absurd Hypothetical Questions
+
+═════════════════════════════════════════════════════════════════════════════════════════
+Economics Lover  |  Shelves: economics
+═════════════════════════════════════════════════════════════════════════════════════════
+Shelf anchors (rating=1.0):
+  + The Road to Serfdom
+  + The Undercover Economist
+  + Economics in One Lesson: The Shortest & Surest Way to Understand Basic Economics
+  + Capitalism and Freedom
+  + The Undoing Project: A Friendship That Changed Our Minds
+─────────────────────────────────────────────────────────────────────────────────────────
+Favorite Books                       Recommendations
+─────────────────────────────────────────────────────────────────────────────────────────
+The Intelligent Investor             Meditations
+The Wealth of Nations                Guns, Germs, and Steel: The Fates of Human Societies
+Capital in the Twenty-First Century  The Prince
+                                     Thinking, Fast and Slow
+                                     The Rise and Fall of the Third Reich: A History of Nazi Germany
+                                     The Art of War
+                                     Why Nations Fail: The Origins of Power, Prosperity, and Poverty
+                                     Team of Rivals: The Political Genius of Abraham Lincoln
+                                     Genghis Khan and the Making of the Modern World
+                                     The Tipping Point: How Little Things Can Make a Big Difference
+
+═══════════════════════════════════════════════════════════════════════════════════════════
+Philosophy & Existentialist Thinker  |  Shelves: philosophy, existentialism
+═══════════════════════════════════════════════════════════════════════════════════════════
+Shelf anchors (rating=1.0):
+  + Critique of Pure Reason
+  + Complete Works
+  + A Treatise of Human Nature
+  + Discourse on Method
+  + The Problems of Philosophy
+  + Being and Time
+  + Nausea
+  + The Fall
+  + The Gay Science
+  + L'Étranger
+───────────────────────────────────────────────────────────────────────────────────────────
+Favorite Books                         Recommendations
+───────────────────────────────────────────────────────────────────────────────────────────
+The Republic                           Politics
+The Stranger                           A History of Western Philosophy
+Thus Spoke Zarathustra                 Tractatus Logico-Philosophicus
+The Myth of Sisyphus and Other Essays  Beyond Good and Evil
+Meditations                            Civilization and Its Discontents
+                                       Phenomenology of Spirit
+                                       Discourse on Method and Meditations on First Philosophy
+                                       Leviathan
+                                       Philosophical Investigations
+                                       Being and Nothingness
+
+════════════════════════════════════════════════════════════════════════════════════════════════════════
+Graphic Novel/Comic Lover  |  Shelves: graphic-novels, comics, graphic-novel
+════════════════════════════════════════════════════════════════════════════════════════════════════════
+Shelf anchors (rating=1.0):
+  + The Hard Goodbye (Sin City #1)
+  + Preacher, Volume 7: Salvation
+  + That Yellow Bastard (Sin City #4)
+  + Black Hole
+  + Preacher, Volume 9: Alamo
+  + Batman: The Black Mirror
+  + Batman & Robin: Batman vs. Robin
+  + Tintin in the Land of the Soviets (Tintin #1)
+  + The Seven Crystal Balls (Tintin, #13)
+  + The Incredible Hulk: Planet Hulk
+  + Friends With Boys
+  + Fables, Vol. 12: The Dark Ages
+  + Preacher, Volume 3: Proud Americans
+  + Mouse Guard: Fall 1152 (Mouse Guard, #1)
+  + Fables, Vol. 6: Homelands
+────────────────────────────────────────────────────────────────────────────────────────────────────────
+Favorite Books                                      Recommendations
+────────────────────────────────────────────────────────────────────────────────────────────────────────
+Watchmen                                            Hellboy, Vol. 1: Seed of Destruction (Hellboy, #1)
+Saga, Vol. 1 (Saga, #1)                             Batman: The Killing Joke
+Maus I: A Survivor's Tale: My Father Bleeds History (Maus, #1)  Y: The Last Man, Vol. 1: Unmanned
+                                                    Fables, Vol. 1: Legends in Exile
+                                                    Batman: Year One
+                                                    Batman: The Dark Knight Returns (The Dark Knight Saga, #1)
+                                                    Kingdom Come
+                                                    V for Vendetta
+                                                    Preacher, Volume 1: Gone to Texas
+                                                    Marvel 1602
+
+════════════════════════════════════════════════════════════════════════════════════════════════════════
+Manga Lover  |  Shelves: anime, mangas
+════════════════════════════════════════════════════════════════════════════════════════════════════════
+Shelf anchors (rating=1.0):
+  + The Gentlemen's Alliance †, Vol. 1
+  + Fruits Basket, Vol. 16
+  + Chibi Vampire, Vol. 01
+  + Bleach, Volume 03
+  + Maid-sama! Vol. 01 (Maid-sama!, #1)
+  + Kare Kano: His and Her Circumstances, Vol. 1
+  + Fullmetal Alchemist, Vol. 7 (Fullmetal Alchemist, #7)
+  + Fullmetal Alchemist, Vol. 8 (Fullmetal Alchemist, #8)
+  + Vampire Knight, Vol. 5 (Vampire Knight, #5)
+  + Reborn! Vol. 01: Reborn Arrives! (Reborn!, #1)
+────────────────────────────────────────────────────────────────────────────────────────────────────────
+Favorite Books                                      Recommendations
+────────────────────────────────────────────────────────────────────────────────────────────────────────
+One Piece, Volume 08: I Won't Die (One Piece, #8)   Naruto, Vol. 01: The Tests of the Ninja (Naruto, #1)
+Fullmetal Alchemist, Vol. 3 (Fullmetal Alchemist, #3)  Fullmetal Alchemist, Vol. 1 (Fullmetal Alchemist, #1)
+Death Note, Vol. 3: Hard Run (Death Note, #3)       Death Note, Vol. 1: Boredom (Death Note, #1)
+Soul Eater, Vol. 02 (Soul Eater, #2)                Black Butler, Vol. 1 (Black Butler, #1)
+Fairy Tail, Vol. 1 (Fairy Tail, #1)                 Vampire Knight, Vol. 1 (Vampire Knight, #1)
+Dragon Ball, Vol. 1: The Monkey King (Dragon Ball, #1)  Rurouni Kenshin, Vol. 1: Meiji Swordsman Romantic Story (Rurouni Kenshin, #1)
+Berserk, Vol. 1 (Berserk, #1)                       Bleach, Volume 02
+Death Note, Vol. 11: Kindred Spirits (Death Note, #11)  Kimi ni Todoke: From Me to You, Vol. 1
+                                                    Bleach, Volume 01
+                                                    Naruto, Vol. 03: Bridge of Courage (Naruto, #3)
+
+═════════════════════════════════════════════════════════════════════════════════════════════════
+Religion Book Reader  |  Shelves: religion
+═════════════════════════════════════════════════════════════════════════════════════════════════
+Shelf anchors (rating=1.0):
+  + The World's Religions: Our Great Wisdom Traditions
+  + The Qur'an / القرآن الكريم
+  + A History of God: The 4,000-Year Quest of Judaism, Christianity, and Islam
+  + The Case for Christ
+  + Holy Bible: King James Version
+─────────────────────────────────────────────────────────────────────────────────────────────────
+Favorite Books                               Recommendations
+─────────────────────────────────────────────────────────────────────────────────────────────────
+Holy Bible: New International Version        The Prince
+Crazy Love: Overwhelmed by a Relentless God  The 7 Habits of Highly Effective People: Powerful Lessons in Personal Change
+The Red Tent                                 The Art of War
+Siddhartha                                   Mere Christianity
+الرحيق المختوم                               The Republic
+Orthodoxy                                    The Purpose Driven Life: What on Earth Am I Here for?
+                                             The Problem of Pain
+                                             How to Win Friends and Influence People
+                                             The Prophet
+                                             The Five Love Languages: How to Express Heartfelt Commitment to Your Mate
+
+══════════════════════════════════════════════════════════════════════════════════
+Poetry Lover  |  Shelves: poetry
+══════════════════════════════════════════════════════════════════════════════════
+Shelf anchors (rating=1.0):
+  + Les Fleurs du Mal
+  + The Waste Land
+  + Sonnets from the Portuguese
+  + Stopping by Woods on a Snowy Evening
+  + The Waste Land and Other Poems
+──────────────────────────────────────────────────────────────────────────────────
+Favorite Books                         Recommendations
+──────────────────────────────────────────────────────────────────────────────────
+Leaves of Grass                        The Poetry of Pablo Neruda
+The Complete Poems of Emily Dickinson  The Collected Poems
+The Essential Rumi                     Selected Poems
+Milk and Honey                         The Poetry of Robert Frost
+                                       The Selected Poetry of Rainer Maria Rilke
+                                       The Collected Poems of W.B. Yeats
+                                       Twenty Love Poems and a Song of Despair
+                                       The Prophet
+                                       Walden
+                                       100 Love Sonnets
+
+══════════════════════════════════════════════════════════════════════════
+Children's Book Lover  |  Shelves: childrens, children-s, picture-books
+══════════════════════════════════════════════════════════════════════════
+Shelf anchors (rating=1.0):
+  + Frosty the Snowman (Frosty the Snowman)
+  + The Tale of Jemima Puddle-Duck
+  + The Wonderful Wizard of Oz (Oz, #1)
+  + Little Bear
+  + In the Night Kitchen
+  + The Foot Book: Dr. Seuss's Wacky Book of Opposites
+  + The Cat in the Hat Comes Back
+  + Falling Up
+  + The Little Engine That Could
+  + The Lorax
+  + Duck! Rabbit!
+  + This is Not My Hat
+  + The Adventures of Beekle: The Unimaginary Friend
+  + I Want My Hat Back
+  + The Fantastic Flying Books of Mr. Morris Lessmore
+──────────────────────────────────────────────────────────────────────────
+Favorite Books             Recommendations
+──────────────────────────────────────────────────────────────────────────
+Where the Wild Things Are  Olivia
+The Giving Tree            Don't Let the Pigeon Drive the Bus!
+Where the Sidewalk Ends    Go, Dog. Go!
+Matilda                    Stellaluna
+                           Guess How Much I Love You
+                           Frog and Toad Are Friends (Frog and Toad, #1)
+                           The Paper Bag Princess
+                           Are You My Mother?
+                           The Day the Crayons Quit
+                           Brown Bear, Brown Bear, What Do You See?
