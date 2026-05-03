@@ -165,8 +165,10 @@ Genre context is derived entirely from the user's book history (no explicit genr
 
 ## Current Production Model
 
-**Serving checkpoint (deployed):** `saved_models/best_full_softmax_4pool_20260501_073113.pth`
-Serving artifacts are in `serving/` and deployed to the Streamlit app. This is the V2 architecture — quadruple shallow pools + user shelf affinity tower + full softmax.
+**Serving checkpoint (deployed):** `saved_models/best_full_softmax_4pool_alpha_02_20260503_111805.pth`
+Serving artifacts are in `serving/` and deployed to the Streamlit app. This is the V2 architecture — quadruple shallow pools + user shelf affinity tower + full softmax + popularity logit adjustment (alpha=0.2).
+
+**Previous PROD (V2, no debiasing):** `saved_models/best_full_softmax_4pool_20260501_073113.pth` — superseded by V2 + alpha=0.2.
 
 **Previous PROD (ipool):** `saved_models/OLD_PROD_best_proj_softmax_ipool_20260426_093432.pth` — superseded by V2.
 

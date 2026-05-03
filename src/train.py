@@ -48,6 +48,11 @@ def get_softmax_config() -> dict:
         # strong contrast. 0.5/batch_size gave ~0.001 (effectively argmax), causing
         # gradient collapse onto the hardest negative and popularity overfitting.
         'temperature':      0.1,
+        # Menon et al. 2021 logit adjustment: add alpha*log1p(count_i) to all logits.
+        # Popular items get a free boost → easy positives → embeddings shrink naturally.
+        # Rare items must fight for high scores → embeddings grow.
+        # Raw dot products at inference are then debiased without any post-hoc correction.
+        'popularity_alpha': 0.2,
     }
     return config
 
@@ -185,6 +190,14 @@ def train_softmax(model: BookRecommender, train_data: tuple, val_data: tuple,
     print_model_summary(model)
 
     pad_idx          = len(fs.top_books)
+
+    # Popularity logit adjustment (Menon et al. 2021)
+    alpha = config.get('popularity_alpha', 0.0)
+    counts_cpu = torch.bincount(target_book_idx_train.cpu(), minlength=pad_idx).float()
+    popularity_bias = (alpha * torch.log1p(counts_cpu)).to(device)
+    print(f"  Popularity bias: alpha={alpha}  "
+          f"max_adj={popularity_bias.max():.3f}  min_adj={popularity_bias.min():.3f}")
+
     optimizer        = torch.optim.Adam(model.parameters(), lr=config['lr'],
                                         weight_decay=config['weight_decay'],
                                         eps=config['adam_eps'])
@@ -202,8 +215,9 @@ def train_softmax(model: BookRecommender, train_data: tuple, val_data: tuple,
 
     os.makedirs(checkpoint_dir, exist_ok=True)
     run_timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    alpha_tag     = str(alpha).replace('.', '') if alpha != int(alpha) else str(int(alpha))
     best_val_loss = float('inf')
-    best_path     = os.path.join(checkpoint_dir, f'best_full_softmax_4pool_{run_timestamp}.pth')
+    best_path     = os.path.join(checkpoint_dir, f'best_full_softmax_4pool_alpha_{alpha_tag}_{run_timestamp}.pth')
 
     # Fixed val subset — sampled once so val_loss is comparable across steps
     val_eval_size = min(8_192, n_val)
@@ -288,7 +302,7 @@ def train_softmax(model: BookRecommender, train_data: tuple, val_data: tuple,
 
             if i > 0 and i % checkpoint_every == 0:
                 periodic = os.path.join(checkpoint_dir,
-                                        f'full_softmax_4pool_{run_timestamp}_step_{i:06d}.pth')
+                                        f'full_softmax_4pool_alpha_{alpha_tag}_{run_timestamp}_step_{i:06d}.pth')
                 torch.save(model.state_dict(), periodic)
                 with open(periodic.replace('.pth', '.json'), 'w') as f:
                     json.dump(config, f, indent=4)
@@ -306,7 +320,7 @@ def train_softmax(model: BookRecommender, train_data: tuple, val_data: tuple,
             U = model.user_embedding(X_genre_train[ix], h_full, h_liked, h_disliked,
                                      h_weighted, r_weighted, timestamp_train[ix])
 
-            scores = (U @ V_all.T) / temperature
+            scores = (U @ V_all.T) / temperature + popularity_bias
             labels = target_book_idx_train[ix]
             loss   = F.cross_entropy(scores, labels)
             optimizer.zero_grad()

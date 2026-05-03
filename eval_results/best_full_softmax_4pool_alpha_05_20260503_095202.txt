@@ -1,0 +1,13 @@
+── Offline Evaluation  (50,000 rollback examples, 5,000 val users) ──
+Checkpoint: saved_models/best_full_softmax_4pool_alpha_05_20260503_095202.pth
+Corpus: 14,753 books
+
+     K    Recall@K   Hit Rate@K    NDCG@K
+─────────────────────────────────────────
+     1      0.0345       0.0345    0.0345
+     5      0.1025       0.1025    0.0686
+    10      0.1532       0.1532    0.0849
+    20      0.2194       0.2194    0.1016
+    50      0.3323       0.3323    0.1240
+─────────────────────────────────────────
+MRR: 0.0755
