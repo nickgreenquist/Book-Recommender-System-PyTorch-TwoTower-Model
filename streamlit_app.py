@@ -508,10 +508,10 @@ def tab_about():
         st.markdown(
             "A PyTorch two-tower neural network trained on the "
             "[UCSD Goodreads dataset](https://cseweb.ucsd.edu/~jmcauley/datasets/goodreads.html) "
-            "(~11k books, ~4.7M training examples)."
+            "(~14.7k books, ~4.7M training examples)."
         )
         st.markdown(
-            "Trained with in-batch negatives softmax loss, following the YouTube DNN retrieval "
+            "Trained with full softmax loss over the entire book corpus, following the YouTube DNN retrieval "
             "approach (Covington et al., 2016)."
         )
         st.markdown(
@@ -543,8 +543,9 @@ def tab_about():
         st.markdown("""
 | Component | Input | What it learns |
 |---|---|---|
-| Item Tower Avg Pool | Read history — full 128-dim item embeddings weighted by ratings | Collaborative taste — pools the complete item tower output (genre + shelf + ID + author + year) over all read books |
-| user_genre_tower | Avg rating per genre + read fraction per genre | Genre affinity — how strongly you lean toward each of the broad genre categories |
+| Quadruple ID pools (×4) | Read history split by rating signal: full, liked (≥4★), disliked (≤2★), rating-weighted | Collaborative taste — four sum pools over 32-dim item ID embeddings, each stabilized with LayerNorm |
+| user_shelf_affinity_tower | Per-book TF-IDF shelf vectors pooled over read history | Shelf taste — 64-dim representation of which crowd-sourced tags (e.g. "cozy-mystery", "epic-fantasy") dominate your reading |
+| user_genre_tower | Avg rating per genre + read fraction per genre | Genre affinity — how strongly you lean toward each broad genre |
 | timestamp_embedding_tower | Month bin of most recent read activity | Temporal context — captures when in time the user's taste signal was formed |
 """, unsafe_allow_html=True)
 
@@ -574,37 +575,38 @@ space: a book you liked pulls your user embedding directly toward that book's em
         st.header("Training")
         st.markdown("""
 - **Dataset:** UCSD Goodreads — ~228M interactions across ~2.4M users and ~2.4M books
-- **Corpus filtering:** Books with fewer than 10,000 ratings are excluded (~11k books retained). Users with fewer than 20 or more than 500 corpus ratings are excluded. This ensures every book and user in the training set has enough signal to learn meaningful embeddings. It also keeps the serving artifacts small enough to deploy on Streamlit Cloud without needing paid infrastructure.
-- **Loss:** Cross-entropy over in-batch negatives (softmax) — each step produces a B×B score matrix; diagonal entries are the correct targets
-- **Optimizer:** Adam, lr=0.001, weight_decay=1e-5, CosineAnnealingLR
-- **Batch size:** 512 (511 in-batch negatives per example)
+- **Corpus filtering:** Books with fewer than 7,500 ratings are excluded (~14.7k books retained). Users with fewer than 15 or more than 1,000 corpus ratings are excluded.
+- **Loss:** Full softmax cross-entropy — each step scores all ~14.7k books; the true target must rank above the entire corpus
+- **Popularity logit adjustment:** Menon et al. (2021) — `alpha * log1p(count_i)` added to each item's training logit. Popular items score higher as negatives, forcing the model to genuinely beat them when ranking a rare positive. Embeddings self-debias during training; raw dot products are used at inference unchanged.
+- **Optimizer:** Adam, lr=0.001, CosineAnnealingLR
+- **Batch size:** 512
 - **Steps:** 150,000
 - **Training examples:** Rollback construction — for each read event, context = all prior reads. Up to 10 examples per user sampled randomly (~4.7M train / 526k val)
 """)
 
         st.header("Offline Evaluation Results")
         st.markdown(
-            "Leave-label-out protocol on 5,000 held-out val users (~11k book corpus). "
-            "Random baseline Hit Rate@10 ≈ 0.87% (avg ~10 label books per user)."
+            "Rollback protocol on 5,000 held-out val users (14.7k book corpus). "
+            "Single target per example."
         )
         st.markdown("""
-| Metric | MSE | BPR | Softmax | Softmax + Projection | **+ Item Tower Pool** |
-|---|---|---|---|---|---|
-| Hit Rate@10 | 4.7% | 3.5% | 10.7% | 13.0% | **14.0%** |
-| Hit Rate@50 | 17.6% | 14.4% | 28.9% | 33.0% | **36.3%** |
-| Recall@10 | 0.0069 | 0.0041 | 0.0164 | 0.0241 | **0.0258** |
-| NDCG@10 | 0.0073 | 0.0042 | 0.0189 | 0.0255 | **0.0274** |
-| MRR | 0.024 | 0.016 | 0.053 | 0.064 | **0.067** |
+| Metric | MSE | BPR | Softmax | + Projection | ipool | V2 | **V2 + α=0.2 (PROD)** |
+|---|---|---|---|---|---|---|---|
+| Hit Rate@10 | 4.7% | 3.5% | 10.7% | 13.0% | 14.0% | 15.5% | **16.0%** |
+| Hit Rate@50 | 17.6% | 14.4% | 28.9% | 33.0% | 36.3% | 36.1% | **36.0%** |
+| NDCG@10 | 0.0073 | 0.0042 | 0.0189 | 0.0255 | 0.0274 | 0.0859 | **0.0880** |
+| MRR | 0.024 | 0.016 | 0.053 | 0.064 | 0.067 | 0.0775 | **0.0786** |
 """)
         st.markdown(
             "Switching from MSE to softmax improved Hit Rate@10 by **127%**. "
-            "Adding projection MLPs improved it a further **21%** (10.7% → 13.0%). "
-            "Replacing the id-pool in the user tower with full item tower pooling added another **8%** (13.0% → 14.0%)."
+            "Adding projection MLPs improved it a further **21%**. "
+            "V2 (quadruple pools + shelf affinity tower + full softmax) added another **11%** on top of ipool. "
+            "Menon logit adjustment (α=0.2) added a further **3%**."
         )
 
         st.header("Limitations")
         st.markdown("""
-- ~11k-book corpus — books with fewer than 10,000 ratings are not included
+- ~14.7k-book corpus — books with fewer than 7,500 ratings are not included
 - Romance and literary women's fiction can bleed into each other due to overlapping genre/shelf signals
 - The timestamp tower is a weak signal in the app — all inference users receive the most recent timestamp bin
 """)

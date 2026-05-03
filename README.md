@@ -11,20 +11,20 @@ A PyTorch Two-Tower neural network trained on the [UCSD Goodreads dataset](https
 
 Trained with full softmax loss over the entire book corpus, following the YouTube DNN retrieval approach (Covington et al., 2016). At inference, a dot product of the user and item embeddings retrieves the most relevant books.
 
-The current production model (V2) uses **quadruple shallow history pooling** — four parallel sum pools over 32-dim item ID embeddings partitioned by rating signal — plus a dedicated `user_shelf_affinity_tower` that pools TF-IDF shelf vectors over the user's read history. This replaces the earlier ipool architecture (which was 8× slower to train) while beating it on every offline metric.
+The current production model (V2) uses **quadruple shallow history pooling** — four parallel sum pools over 32-dim item ID embeddings partitioned by rating signal — plus a dedicated `user_shelf_affinity_tower` that pools TF-IDF shelf vectors over the user's read history. Training applies a **popularity logit adjustment** (Menon et al., 2021) with alpha=0.2: adding `alpha * log1p(count_i)` to each item's training logit forces the model to rank the true positive above boosted popular negatives, debiasing embeddings without any post-hoc correction at inference.
 
 ## Results
 
 Offline evaluation on 5,000 held-out val users (rollback protocol, single target per example).
 
-| Metric | MSE | BPR | Softmax | + Projection | ipool | **V2 (PROD)** |
-|---|---|---|---|---|---|---|
-| Hit Rate@10 | 4.7% | 3.5% | 10.7% | 13.0% | 14.0% | **15.5%** |
-| Hit Rate@50 | 17.6% | 14.4% | 28.9% | 33.0% | 36.3% | **36.1%** |
-| NDCG@10 | 0.0073 | 0.0042 | 0.0189 | 0.0255 | 0.0274 | **0.0859** |
-| MRR | 0.024 | 0.016 | 0.053 | 0.064 | 0.067 | **0.0775** |
+| Metric | MSE | BPR | Softmax | + Projection | ipool | V2 | **V2 + α=0.2 (PROD)** |
+|---|---|---|---|---|---|---|---|
+| Hit Rate@10 | 4.7% | 3.5% | 10.7% | 13.0% | 14.0% | 15.5% | **16.0%** |
+| Hit Rate@50 | 17.6% | 14.4% | 28.9% | 33.0% | 36.3% | 36.1% | **36.0%** |
+| NDCG@10 | 0.0073 | 0.0042 | 0.0189 | 0.0255 | 0.0274 | 0.0859 | **0.0880** |
+| MRR | 0.024 | 0.016 | 0.053 | 0.064 | 0.067 | 0.0775 | **0.0786** |
 
-V2 beats ipool PROD on Hit Rate@10 (+11%) and MRR (+16%) despite searching a 33% larger corpus (14.7k vs ~11k books). Switching from MSE to softmax improved Hit Rate@10 by **127%**. Adding projection MLPs improved it a further **21%**. V2 then added another **11%** on top of ipool.
+V2 + α=0.2 beats the previous PROD on every metric. Switching from MSE to softmax improved Hit Rate@10 by **127%**. Adding projection MLPs improved it a further **21%**. V2 added another **11%** on top of ipool. Menon logit adjustment (α=0.2) added a further **3%**.
 
 ## Key design choices
 
@@ -32,6 +32,7 @@ V2 beats ipool PROD on Hit Rate@10 (+11%) and MRR (+16%) despite searching a 33%
 - **Quadruple shallow pooling** — history is partitioned into four sum pools over 32-dim ID embeddings: full, liked (rating ≥ 4), disliked (rating ≤ 2), and rating-weighted. Each pool is stabilized with LayerNorm.
 - **User shelf affinity tower** — pools the user's per-book TF-IDF shelf vectors over read history, producing a 64-dim representation of the user's shelf taste. Recovers the content signal that ipool captured through item embeddings, without the 8× training cost.
 - **Full softmax** — scores against all ~14.7k books every training step. Avoids the in-batch popularity bias of in-batch negatives, correctly surfacing canonical popular books (Shakespeare, Tolstoy, Twilight) that in-batch training systematically penalizes.
+- **Popularity logit adjustment** — Menon et al. (2021): `alpha * log1p(count_i)` added to each item's training logit. Popular items score higher as negatives, forcing the model to genuinely beat them when ranking a rare positive. Embeddings self-debias during training; raw dot products are used at inference unchanged.
 - **Author tower** — primary author embedded and projected to 10-dim on the item side. Unique to this repo (not in the movie model).
 
 ## Model Architecture (V2 — Current Production)

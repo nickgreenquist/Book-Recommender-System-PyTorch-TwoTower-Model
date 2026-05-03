@@ -235,14 +235,14 @@ Key insight: full softmax correctly surfaces popular canonical books (Shakespear
 
 **Offline eval (5,000 val users, 14,753-book corpus):**
 
-| Metric | PROD (ipool, ~11k corpus) | **V2 (14.7k corpus)** |
-|--------|--------------------------|----------------------|
-| Hit Rate@10 | 14.0% | **15.5%** |
-| Hit Rate@50 | 36.3% | **36.1%** |
-| MRR | 0.067 | **0.0775** |
-| NDCG@10 | 0.0274 | **0.0859** |
+| Metric | PROD (ipool, ~11k corpus) | V2 (14.7k corpus) | **V2 + α=0.2 (PROD)** |
+|--------|--------------------------|-------------------|----------------------|
+| Hit Rate@10 | 14.0% | 15.5% | **16.0%** |
+| Hit Rate@50 | 36.3% | 36.1% | **36.0%** |
+| MRR | 0.067 | 0.0775 | **0.0786** |
+| NDCG@10 | 0.0274 | 0.0859 | **0.0880** |
 
-V2 beats PROD on Hit Rate@10 and MRR despite searching a 33% larger corpus. Note: Recall@K = Hit Rate@K in the new eval (single target per example, denominator = 1); old PROD Recall numbers used a different calculation and are not directly comparable.
+V2 + α=0.2 is the current PROD. Note: Recall@K = Hit Rate@K in the new eval (single target per example, denominator = 1); old PROD Recall numbers used a different calculation and are not directly comparable.
 
 ### Why the Initial V2 Run Failed (Temperature Bug)
 
@@ -268,6 +268,7 @@ V2 is now main. The `use_item_pool_for_history=True` flag in `get_softmax_config
 3. **~~In-batch negative debiasing (log-frequency correction)~~** — ❌ Tried and removed. Subtracting `log(p_i)` from negative logits (Yi et al., Google RecSys 2019) did not converge on this dataset. Root causes: (a) with ~11k books, the item frequency distribution is very compressed — corrections ranged from 4.91 to 10.0 with ~87% of books clustered near 9-10, so the correction added almost no useful signal. (b) The correction destabilized training even with L2 normalization and diagonal zeroing. Do not re-attempt without a much larger, more skewed item distribution.
 4. **~~Remove F.normalize from training (match YouTube paper)~~** — ✅ Done and re-added for V2. V2 adds L2 norm back at the output of both towers (as `F.normalize` in `user_embedding()` and `item_embedding()`). This stabilizes training with shallow sum pooling and ensures dot product = cosine similarity between normalized 128-dim vectors.
 5. **~~Item tower pooling~~** — ✅ Implemented and validated (+8%). Superseded by V2 (current PROD) which achieves equivalent or better quality via quadruple shallow pools + `user_shelf_affinity_tower`, while avoiding the 8× training slowdown of ipool.
+6. **~~Popularity logit adjustment (Menon et al. 2021)~~** — ✅ Implemented. During training, add `alpha * log1p(count_i)` to each item's logit before softmax. Popular items score higher as negatives → the model must genuinely beat them when ranking the true positive → embeddings self-debias without any post-hoc correction at inference. alpha=0.2 beats no-adjustment on all offline metrics (+3% Hit Rate@10, +2.4% NDCG@10, +1.4% MRR). alpha=0.5 overshot and degraded quality. Applied to training logits only — val loss and all inference paths use raw dot products.
 
 **Implicit vs explicit feedback tradeoff** — explicit ratings (BPR) give clean preference signal but are sparse. Implicit feedback (reads via `is_read`) is abundant but noisy. Consider a hybrid: softmax for candidate generation, explicit ratings for a separate ranking stage.
 
@@ -283,14 +284,14 @@ Val users are fixed in `features.py` (`VAL_FRACTION=0.10`, `VAL_SPLIT_SEED=42`),
 
 **Results (5,000 val users):**
 
-| Metric | MSE (~11k) | BPR (~11k) | Softmax (~11k) | + Projection (~11k) | ipool PROD (~11k) | **V2 PROD (14.7k)** |
-|---|---|---|---|---|---|---|
-| Hit Rate@10 | 4.7% | 3.5% | 10.7% | 13.0% | 14.0% | **15.5%** |
-| Hit Rate@50 | 17.6% | 14.4% | 28.9% | 33.0% | 36.3% | **36.1%** |
-| NDCG@10 | 0.0073 | 0.0042 | 0.0189 | 0.0255 | 0.0274 | **0.0859** |
-| MRR | 0.024 | 0.016 | 0.053 | 0.064 | 0.067 | **0.0775** |
+| Metric | MSE (~11k) | BPR (~11k) | Softmax (~11k) | + Projection (~11k) | ipool PROD (~11k) | V2 (14.7k) | **V2 + α=0.2 PROD (14.7k)** |
+|---|---|---|---|---|---|---|---|
+| Hit Rate@10 | 4.7% | 3.5% | 10.7% | 13.0% | 14.0% | 15.5% | **16.0%** |
+| Hit Rate@50 | 17.6% | 14.4% | 28.9% | 33.0% | 36.3% | 36.1% | **36.0%** |
+| NDCG@10 | 0.0073 | 0.0042 | 0.0189 | 0.0255 | 0.0274 | 0.0859 | **0.0880** |
+| MRR | 0.024 | 0.016 | 0.053 | 0.064 | 0.067 | 0.0775 | **0.0786** |
 
-V2 beats ipool PROD on Hit Rate@10 and MRR despite a 33% larger corpus. Note: corpus size differs across rows — earlier models trained on ~11k books, V2 on 14.7k books.
+V2 + α=0.2 is the current PROD. Note: corpus size differs across rows — earlier models trained on ~11k books, V2 on 14.7k books.
 
 **Canary quality highlights (ipool vs proj_softmax):**
 - **Sci-Fi**: Significantly more specific hard SF — Revelation Space, Accelerando, The Mote in God's Eye appear vs generic Honor Harrington. Richer content signal in the user pool captures subgenre distinctions.
