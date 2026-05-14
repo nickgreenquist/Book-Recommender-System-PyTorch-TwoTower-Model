@@ -39,6 +39,28 @@ _PLACEHOLDER_HTML = (
 )
 
 
+def _cover_html(url: str) -> str:
+    """Cover HTML that layers an <img> over the placeholder.
+
+    If the image loads, its own dark background masks the 📖 underneath. If it
+    fails (e.g. OL 404 for an audiobook ISBN), onerror hides the img and the
+    placeholder shows through — identical to the no-ISBN fallback.
+
+    Must be rendered with st.html (not st.markdown). st.markdown sanitizes
+    inline event handlers even with unsafe_allow_html=True, which silently
+    drops onerror and leaves a broken-image glyph in the middle of the box.
+    """
+    return (
+        "<div style='position:relative;aspect-ratio:2/3;background:#1e1e1e;"
+        "border-radius:6px;display:flex;align-items:center;justify-content:center;"
+        "font-size:2rem;'>📖"
+        f'<img src="{url}" '
+        "style='position:absolute;inset:0;width:100%;height:100%;"
+        "object-fit:contain;border-radius:6px;background:#1e1e1e' "
+        "onerror=\"this.style.display='none'\"></div>"
+    )
+
+
 
 # ── Startup ───────────────────────────────────────────────────────────────────
 
@@ -231,8 +253,10 @@ def _show_results(result_key: str) -> None:
         cols  = st.columns(_COVER_COLS)
         for col, row in zip(cols, chunk):
             with col:
-                if row.get('Cover'):
-                    st.image(row['Cover'], use_container_width=True)
+                url = row.get('Cover')
+                if url:
+                    # st.html (not st.markdown) — markdown strips onerror.
+                    st.html(_cover_html(url))
                 else:
                     st.markdown(_PLACEHOLDER_HTML, unsafe_allow_html=True)
                 st.caption(row['Title'])
