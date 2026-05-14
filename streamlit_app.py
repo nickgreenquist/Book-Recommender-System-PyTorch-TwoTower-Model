@@ -235,7 +235,7 @@ def _show_results(result_key: str) -> None:
                     st.image(row['Cover'], use_container_width=True)
                 else:
                     st.markdown(_PLACEHOLDER_HTML, unsafe_allow_html=True)
-                st.markdown(f"**{row['Title']}**")
+                st.caption(row['Title'])
                 meta = ' · '.join(
                     str(x) for x in (row.get('Author', ''), row.get('Year', '')) if x
                 )
