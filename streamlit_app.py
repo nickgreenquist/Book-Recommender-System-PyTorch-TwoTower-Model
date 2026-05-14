@@ -30,8 +30,13 @@ from src.model import BookRecommender
 _LIKED_BOOK  = VALUE_FAVORITE_BOOK_RATING   # 2.0
 _ANCHOR_BOOK = VALUE_ANCHOR_BOOK_RATING     # 1.0
 _ANCHORS_PER_TAG = 5
-_COVER_WIDTH = 100
-_COVER_ROW_HEIGHT = 200
+_COVER_COLS = 5
+_PAGE_SIZE = 20
+_TOTAL_RESULTS = 60
+_PLACEHOLDER_HTML = (
+    "<div style='background:#1e1e1e;border-radius:6px;aspect-ratio:2/3;"
+    "display:flex;align-items:center;justify-content:center;font-size:2rem;'>📖</div>"
+)
 
 
 
@@ -172,17 +177,13 @@ def _cover_url(bid, fs):
     isbn = fs.get('bookId_to_isbn', {}).get(bid, '')
     if not isbn:
         return ''
-    return f"https://covers.openlibrary.org/b/isbn/{isbn}-L.jpg"
+    # -M (~180px) is plenty for our ~100px display and several× smaller than -L.
+    # default=false makes Open Library 404 instead of redirecting through a slow
+    # placeholder pipeline for missing covers.
+    return f"https://covers.openlibrary.org/b/isbn/{isbn}-M.jpg?default=false"
 
 
-def _top_shelves(bid, fs, n=3):
-    """Return the top-n shelf tag names for a book by raw TF-IDF score."""
-    shelf_ctx = fs['book_shelf_matrix'][fs['bookId_to_idx'][bid]]
-    top_idx   = sorted(range(len(shelf_ctx)), key=lambda i: -shelf_ctx[i].item())[:n]
-    return ', '.join(fs['shelves_ordered'][i] for i in top_idx if shelf_ctx[i] > 0)
-
-
-def _score_books(user_emb, all_ids, all_embs, fs, exclude_titles, top_n=20):
+def _score_books(user_emb, all_ids, all_embs, fs, exclude_titles, top_n=_TOTAL_RESULTS):
     """Dot-product score all books, filter seeds, return top-n as a DataFrame."""
     raw_scores = (all_embs @ user_emb.T).squeeze(-1)
     exclude    = set(exclude_titles)
@@ -193,29 +194,66 @@ def _score_books(user_emb, all_ids, all_embs, fs, exclude_titles, top_n=20):
         if title in exclude:
             continue
         rows.append({
-            'Cover':      _cover_url(bid, fs),
-            'Title':      title,
-            'Author':     fs['bookId_to_author'].get(bid, ''),
-            'Year':       fs['bookId_to_year'].get(bid, '') if fs['bookId_to_year'].get(bid, '') != '-1' else '',
-            'Top Shelves': _top_shelves(bid, fs),
+            'Cover':  _cover_url(bid, fs),
+            'Title':  title,
+            'Author': fs['bookId_to_author'].get(bid, ''),
+            'Year':   fs['bookId_to_year'].get(bid, '') if fs['bookId_to_year'].get(bid, '') != '-1' else '',
         })
         if len(rows) >= top_n:
             break
     return pd.DataFrame(rows)
 
 
-def _render_results(df: pd.DataFrame) -> None:
-    """Render a results DataFrame as a dataframe with cover images."""
-    st.dataframe(
-        df,
-        use_container_width=True,
-        hide_index=True,
-        row_height=_COVER_ROW_HEIGHT,
-        height=_COVER_ROW_HEIGHT * (len(df) // 2) + 38,  # 38px for header row
-        column_config={
-            'Cover': st.column_config.ImageColumn('Cover'),
-        },
-    )
+def _store_results(df: pd.DataFrame, result_key: str) -> None:
+    """Save a results DataFrame to session state and reset to page 0."""
+    st.session_state[f'{result_key}_df']   = df
+    st.session_state[f'{result_key}_page'] = 0
+
+
+def _show_results(result_key: str) -> None:
+    """Render the current page of stored results with Prev / Next navigation.
+
+    Covers stream independently so the page becomes interactive before all
+    images resolve. Prev/Next only re-slices the cached DataFrame — no model
+    re-run.
+    """
+    df = st.session_state.get(f'{result_key}_df')
+    if df is None or df.empty:
+        return
+
+    page        = st.session_state.get(f'{result_key}_page', 0)
+    total_pages = max(1, (len(df) + _PAGE_SIZE - 1) // _PAGE_SIZE)
+    page_df     = df.iloc[page * _PAGE_SIZE:(page + 1) * _PAGE_SIZE]
+    rows        = page_df.to_dict('records')
+
+    for row_start in range(0, len(rows), _COVER_COLS):
+        chunk = rows[row_start:row_start + _COVER_COLS]
+        cols  = st.columns(_COVER_COLS)
+        for col, row in zip(cols, chunk):
+            with col:
+                if row.get('Cover'):
+                    st.image(row['Cover'], use_container_width=True)
+                else:
+                    st.markdown(_PLACEHOLDER_HTML, unsafe_allow_html=True)
+                st.markdown(f"**{row['Title']}**")
+                meta = ' · '.join(
+                    str(x) for x in (row.get('Author', ''), row.get('Year', '')) if x
+                )
+                if meta:
+                    st.caption(meta)
+
+    if total_pages > 1:
+        _, prev_col, info_col, next_col, _ = st.columns([3, 1, 1, 1, 3])
+        if prev_col.button('← Prev', disabled=(page == 0), key=f'{result_key}_prev'):
+            st.session_state[f'{result_key}_page'] = page - 1
+            st.rerun()
+        info_col.markdown(
+            f"<div style='text-align:center;padding-top:0.4rem'>{page + 1} / {total_pages}</div>",
+            unsafe_allow_html=True,
+        )
+        if next_col.button('Next →', disabled=(page >= total_pages - 1), key=f'{result_key}_next'):
+            st.session_state[f'{result_key}_page'] = page + 1
+            st.rerun()
 
 
 # ── Tab: Recommend ────────────────────────────────────────────────────────────
@@ -230,6 +268,8 @@ def tab_recommend(model, fs, all_ids, all_embs, ts_inference):
     if st.session_state.pop('_clear_rec', False):
         for key in ('rec_liked', 'rec_shelf_tags'):
             st.session_state[key] = []
+        for key in ('rec_df', 'rec_page', 'rec_anchor_caption'):
+            st.session_state.pop(key, None)
 
     profile = st.session_state.pop('_load_profile', None)
     if profile:
@@ -264,35 +304,41 @@ def tab_recommend(model, fs, all_ids, all_embs, ts_inference):
     if btn_col.button("Get Recommendations", use_container_width=True):
         if not liked_titles and not selected_shelves:
             st.warning("Select at least one liked book, genre, or shelf tag.")
-            return
+        else:
+            # Compute per-tag anchor pairs so we can display them accurately
+            anchor_tag_book_pairs = []
+            seen_anchors = set(liked_titles)
+            for tag in selected_shelves:
+                for t in _get_shelf_anchors(fs, [tag], exclude=seen_anchors):
+                    anchor_tag_book_pairs.append((tag, t))
+                    seen_anchors.add(t)
 
-        # Compute per-tag anchor pairs so we can display them accurately
-        anchor_tag_book_pairs = []
-        seen_anchors = set(liked_titles)
-        for tag in selected_shelves:
-            for t in _get_shelf_anchors(fs, [tag], exclude=seen_anchors):
-                anchor_tag_book_pairs.append((tag, t))
-                seen_anchors.add(t)
-
-        anchor_titles = [t for _, t in anchor_tag_book_pairs]
-        liked_with_weights = (
-            [(t, _LIKED_BOOK)  for t in liked_titles] +
-            [(t, _ANCHOR_BOOK) for t in anchor_titles]
-        )
-
-        with torch.no_grad():
-            user_emb = _build_user_embedding(
-                model, fs, liked_with_weights, ts_inference,
+            anchor_titles = [t for _, t in anchor_tag_book_pairs]
+            liked_with_weights = (
+                [(t, _LIKED_BOOK)  for t in liked_titles] +
+                [(t, _ANCHOR_BOOK) for t in anchor_titles]
             )
 
-        if anchor_tag_book_pairs:
-            st.caption("Shelf anchors — " + " · ".join(
-                f"{tag}: {t}" for tag, t in anchor_tag_book_pairs
-            ))
+            with torch.no_grad():
+                user_emb = _build_user_embedding(
+                    model, fs, liked_with_weights, ts_inference,
+                )
 
-        df = _score_books(user_emb, all_ids, all_embs, fs,
-                          exclude_titles=liked_titles + anchor_titles)
-        _render_results(df)
+            df = _score_books(user_emb, all_ids, all_embs, fs,
+                              exclude_titles=liked_titles + anchor_titles)
+            _store_results(df, 'rec')
+            if anchor_tag_book_pairs:
+                st.session_state['rec_anchor_caption'] = "Shelf anchors — " + " · ".join(
+                    f"{tag}: {t}" for tag, t in anchor_tag_book_pairs
+                )
+            else:
+                st.session_state.pop('rec_anchor_caption', None)
+
+    if 'rec_df' in st.session_state:
+        caption = st.session_state.get('rec_anchor_caption')
+        if caption:
+            st.caption(caption)
+    _show_results('rec')
 
 
 # ── Tab: Recommend (Examples) ─────────────────────────────────────────────────
@@ -307,11 +353,16 @@ def tab_recommend_examples(model, fs, all_ids, all_embs, ts_inference):
         label_visibility="collapsed",
     )
 
-    if selected_profile:
+    if not selected_profile:
+        st.session_state.pop('examples_profile', None)
+        return
+
+    # Recompute df + cached captions only when the profile changes; Prev/Next
+    # reruns leave the sentinel intact so the model doesn't re-run.
+    if st.session_state.get('examples_profile') != selected_profile:
         fav_books    = USER_TYPE_TO_FAVORITE_BOOKS[selected_profile]
         liked_books  = USER_TYPE_TO_LIKED_BOOKS.get(selected_profile, [])
         shelf_tags   = USER_TYPE_TO_SHELF_TAGS.get(selected_profile, [])
-
         anchor_titles = _get_shelf_anchors(
             fs, shelf_tags, exclude=set(fav_books) | set(liked_books))
 
@@ -324,22 +375,29 @@ def tab_recommend_examples(model, fs, all_ids, all_embs, ts_inference):
             [(t, _ANCHOR_BOOK) for t in liked_books] +
             [(t, _ANCHOR_BOOK) for t in anchor_titles]
         )
-
         with torch.no_grad():
-            user_emb = _build_user_embedding(
-                model, fs, liked_with_weights, ts_inference,
-            )
-
+            user_emb = _build_user_embedding(model, fs, liked_with_weights, ts_inference)
         df = _score_books(user_emb, all_ids, all_embs, fs,
                           exclude_titles=fav_books + liked_books + anchor_titles)
 
-        display_name = selected_profile.removesuffix("'s Recommendations") if selected_profile.endswith("'s Recommendations") else selected_profile
-        st.subheader(f"Recommendations for: {display_name}")
-        if fav_books:
-            st.caption("Because you like: " + ", ".join(fav_books))
-        if anchor_titles:
-            st.caption("Shelf anchors: " + ", ".join(anchor_titles))
-        _render_results(df)
+        _store_results(df, 'examples')
+        st.session_state['examples_profile']       = selected_profile
+        st.session_state['examples_fav_books']     = fav_books
+        st.session_state['examples_anchor_titles'] = anchor_titles
+
+    fav_books     = st.session_state.get('examples_fav_books', [])
+    anchor_titles = st.session_state.get('examples_anchor_titles', [])
+    display_name = (
+        selected_profile.removesuffix("'s Recommendations")
+        if selected_profile.endswith("'s Recommendations")
+        else selected_profile
+    )
+    st.subheader(f"Recommendations for: {display_name}")
+    if fav_books:
+        st.caption("Because you like: " + ", ".join(fav_books))
+    if anchor_titles:
+        st.caption("Shelf anchors: " + ", ".join(anchor_titles))
+    _show_results('examples')
 
 
 # ── Tab: Similar ──────────────────────────────────────────────────────────────
@@ -356,34 +414,42 @@ def tab_similar(be, fs, all_ids, all_norm):
     if st.button("Find Similar Books"):
         if not selections:
             st.warning("Select a book.")
-            return
-        for title in selections:
-            bid = fs['title_to_bookId'].get(title)
-            if bid not in be:
-                st.error(f"'{title}' not in corpus.")
-                continue
+        else:
+            # Drop stale per-seed caches so they don't accumulate forever.
+            for old_title in st.session_state.get('sim_active_titles', []):
+                st.session_state.pop(f'sim_{old_title}_df',   None)
+                st.session_state.pop(f'sim_{old_title}_page', None)
 
-            with torch.no_grad():
-                seed_norm = F.normalize(be[bid]['BOOK_EMBEDDING_COMBINED'], dim=1)
-                sims      = (all_norm @ seed_norm.T).squeeze(-1)
-
-            rows = []
-            for idx in sims.argsort(descending=True).tolist():
-                candidate = all_ids[idx]
-                if candidate == bid:
+            active_titles = []
+            for title in selections:
+                bid = fs['title_to_bookId'].get(title)
+                if bid not in be:
+                    st.error(f"'{title}' not in corpus.")
                     continue
-                rows.append({
-                    'Cover':      _cover_url(candidate, fs),
-                    'Title':      fs['bookId_to_title'][candidate],
-                    'Author':     fs['bookId_to_author'].get(candidate, ''),
-                    'Year':       fs['bookId_to_year'].get(candidate, '') if fs['bookId_to_year'].get(candidate, '') != '-1' else '',
-                    'Top Shelves': _top_shelves(candidate, fs),
-                    'Score':      f"{sims[idx].item():.3f}",
-                })
-                if len(rows) >= 20:
-                    break
+                with torch.no_grad():
+                    seed_norm = F.normalize(be[bid]['BOOK_EMBEDDING_COMBINED'], dim=1)
+                    sims      = (all_norm @ seed_norm.T).squeeze(-1)
+                rows = []
+                for idx in sims.argsort(descending=True).tolist():
+                    candidate = all_ids[idx]
+                    if candidate == bid:
+                        continue
+                    rows.append({
+                        'Cover':  _cover_url(candidate, fs),
+                        'Title':  fs['bookId_to_title'][candidate],
+                        'Author': fs['bookId_to_author'].get(candidate, ''),
+                        'Year':   fs['bookId_to_year'].get(candidate, '') if fs['bookId_to_year'].get(candidate, '') != '-1' else '',
+                    })
+                    if len(rows) >= _TOTAL_RESULTS:
+                        break
+                _store_results(pd.DataFrame(rows), f'sim_{title}')
+                active_titles.append(title)
+            st.session_state['sim_active_titles'] = active_titles
+
+    for title in selections:
+        if f'sim_{title}_df' in st.session_state:
             st.subheader(f"Similar to: {title}")
-            _render_results(pd.DataFrame(rows))
+            _show_results(f'sim_{title}')
 
 
 # ── Tab: Explore Genres ───────────────────────────────────────────────────────
@@ -399,31 +465,31 @@ def tab_explore_genres(model, be, fs):
     if st.button("Explore", key='btn_genre'):
         if not selected_genres:
             st.warning("Select at least one genre.")
-            return
-        ctx = [0.0] * len(genres)
-        for g in selected_genres:
-            ctx[fs['genre_to_i'][g]] = 1.0
-        with torch.no_grad():
-            query = model.item_genre_tower(torch.tensor([ctx])).view(-1)
-        sims = {
-            bid: F.cosine_similarity(
-                query.unsqueeze(0),
-                be[bid]['BOOK_GENRE_EMBEDDING'].view(-1).unsqueeze(0),
-            ).item()
-            for bid in fs['top_books']
-        }
-        rows = [
-            {
-                'Cover':      _cover_url(bid, fs),
-                'Title':      fs['bookId_to_title'][bid],
-                'Author':     fs['bookId_to_author'].get(bid, ''),
-                'Year':       fs['bookId_to_year'].get(bid, '') if fs['bookId_to_year'].get(bid, '') != '-1' else '',
-                'Top Shelves': _top_shelves(bid, fs),
-                'Score':      f'{s:.4f}',
+        else:
+            ctx = [0.0] * len(genres)
+            for g in selected_genres:
+                ctx[fs['genre_to_i'][g]] = 1.0
+            with torch.no_grad():
+                query = model.item_genre_tower(torch.tensor([ctx])).view(-1)
+            sims = {
+                bid: F.cosine_similarity(
+                    query.unsqueeze(0),
+                    be[bid]['BOOK_GENRE_EMBEDDING'].view(-1).unsqueeze(0),
+                ).item()
+                for bid in fs['top_books']
             }
-            for bid, s in sorted(sims.items(), key=lambda x: x[1], reverse=True)[:20]
-        ]
-        _render_results(pd.DataFrame(rows))
+            rows = [
+                {
+                    'Cover':  _cover_url(bid, fs),
+                    'Title':  fs['bookId_to_title'][bid],
+                    'Author': fs['bookId_to_author'].get(bid, ''),
+                    'Year':   fs['bookId_to_year'].get(bid, '') if fs['bookId_to_year'].get(bid, '') != '-1' else '',
+                }
+                for bid, _ in sorted(sims.items(), key=lambda x: x[1], reverse=True)[:_TOTAL_RESULTS]
+            ]
+            _store_results(pd.DataFrame(rows), 'genres')
+
+    _show_results('genres')
 
 
 # ── Tab: Explore Shelves ──────────────────────────────────────────────────────
@@ -441,62 +507,64 @@ def tab_explore_shelves(model, be, fs):
     if st.button("Explore", key='btn_shelf'):
         if not selected_tags:
             st.warning("Select at least one shelf tag.")
-            return
+        else:
+            anchor_tag_book_pairs = []
+            seen_titles = set()
+            for tag in selected_tags:
+                if tag not in fs['shelf_to_i']:
+                    continue
+                tag_idx     = fs['shelf_to_i'][tag]
+                sorted_bids = sorted(
+                    fs['top_books'],
+                    key=lambda bid: float(fs['book_shelf_matrix'][fs['bookId_to_idx'][bid]][tag_idx]),
+                    reverse=True,
+                )
+                count = 0
+                for bid in sorted_bids:
+                    if count >= _ANCHORS_PER_TAG:
+                        break
+                    title = fs['bookId_to_title'][bid]
+                    if title not in seen_titles:
+                        anchor_tag_book_pairs.append((tag, bid, title))
+                        seen_titles.add(title)
+                        count += 1
 
-        anchor_tag_book_pairs = []
-        seen_titles = set()
-        for tag in selected_tags:
-            if tag not in fs['shelf_to_i']:
-                continue
-            tag_idx     = fs['shelf_to_i'][tag]
-            sorted_bids = sorted(
-                fs['top_books'],
-                key=lambda bid: float(fs['book_shelf_matrix'][fs['bookId_to_idx'][bid]][tag_idx]),
-                reverse=True,
-            )
-            count = 0
-            for bid in sorted_bids:
-                if count >= _ANCHORS_PER_TAG:
-                    break
-                title = fs['bookId_to_title'][bid]
-                if title not in seen_titles:
-                    anchor_tag_book_pairs.append((tag, bid, title))
-                    seen_titles.add(title)
-                    count += 1
+            if not anchor_tag_book_pairs:
+                st.warning("None of the selected tags found in shelf vocabulary.")
+            else:
+                anchor_bids = [bid for _, bid, _ in anchor_tag_book_pairs]
+                anchor_set  = set(anchor_bids)
+                query_emb   = torch.stack([
+                    be[bid]['BOOK_SHELF_EMBEDDING'].view(-1) for bid in anchor_bids
+                ]).mean(dim=0)
 
-        if not anchor_tag_book_pairs:
-            st.warning("None of the selected tags found in shelf vocabulary.")
-            return
+                sims = {
+                    bid: F.cosine_similarity(
+                        query_emb.unsqueeze(0),
+                        be[bid]['BOOK_SHELF_EMBEDDING'].view(-1).unsqueeze(0),
+                    ).item()
+                    for bid in fs['top_books']
+                }
+                rows = [
+                    {
+                        'Cover':  _cover_url(bid, fs),
+                        'Title':  fs['bookId_to_title'][bid] + ('  ◀ ANCHOR' if bid in anchor_set else ''),
+                        'Author': fs['bookId_to_author'].get(bid, ''),
+                        'Year':   fs['bookId_to_year'].get(bid, '') if fs['bookId_to_year'].get(bid, '') != '-1' else '',
+                    }
+                    for bid, _ in sorted(sims.items(), key=lambda x: x[1], reverse=True)[:_TOTAL_RESULTS]
+                ]
+                _store_results(pd.DataFrame(rows), 'shelves')
+                st.session_state['shelves_anchor_caption'] = (
+                    "Shelf anchors — "
+                    + " · ".join(f"{tag}: {title}" for tag, _, title in anchor_tag_book_pairs)
+                )
 
-        anchor_bids = [bid for _, bid, _ in anchor_tag_book_pairs]
-        anchor_set  = set(anchor_bids)
-        query_emb   = torch.stack([
-            be[bid]['BOOK_SHELF_EMBEDDING'].view(-1) for bid in anchor_bids
-        ]).mean(dim=0)
-
-        sims = {
-            bid: F.cosine_similarity(
-                query_emb.unsqueeze(0),
-                be[bid]['BOOK_SHELF_EMBEDDING'].view(-1).unsqueeze(0),
-            ).item()
-            for bid in fs['top_books']
-        }
-        rows = [
-            {
-                'Cover':      _cover_url(bid, fs),
-                'Title':      fs['bookId_to_title'][bid] + ('  ◀ ANCHOR' if bid in anchor_set else ''),
-                'Author':     fs['bookId_to_author'].get(bid, ''),
-                'Year':       fs['bookId_to_year'].get(bid, '') if fs['bookId_to_year'].get(bid, '') != '-1' else '',
-                'Top Shelves': _top_shelves(bid, fs),
-                'Score':      f'{s:.4f}',
-            }
-            for bid, s in sorted(sims.items(), key=lambda x: x[1], reverse=True)[:20]
-        ]
-        st.caption(
-            "Shelf anchors — "
-            + " · ".join(f"{tag}: {title}" for tag, _, title in anchor_tag_book_pairs)
-        )
-        _render_results(pd.DataFrame(rows))
+    if 'shelves_df' in st.session_state:
+        caption = st.session_state.get('shelves_anchor_caption')
+        if caption:
+            st.caption(caption)
+    _show_results('shelves')
 
 
 # ── Tab: About ───────────────────────────────────────────────────────────────
