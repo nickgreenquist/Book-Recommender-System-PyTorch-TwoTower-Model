@@ -369,6 +369,37 @@ torch.save(state_dict, model_path)
 
 Store `book_shelf_matrix` and `book_author_idx` separately in `feature_store.pt` instead. The Streamlit app rebuilds the model via `build_model(config, fs)` which reconstructs the buffers from the FeatureStore — same as training. Only the learned weights need to come from the checkpoint.
 
+### TODO: improve cover coverage AND performance (replace OL with Goodreads `image_url`)
+
+Status: **not implemented — known issue, plan is documented below.**
+
+**Coverage bug (root cause):** Similar tab on popular seeds (e.g. *Twilight*, *The Great Gatsby*) shows all placeholder covers. Diagnosed May 2026: the bug is not in `tab_similar` — it's data coverage. Popular books cluster with other popular books in the embedding space, and popular books in our metadata frequently have **empty ISBNs** (likely because Goodreads' work-level entry doesn't carry an ISBN; only specific editions do). Measured top-60 cosine neighbors per seed:
+
+| Seed | Candidates lacking ISBN |
+|---|---|
+| Twilight | 59/60 |
+| The Great Gatsby | 56/60 |
+| The Hunger Games | 18/60 |
+| Harry Potter #1 | 17/60 |
+| To Kill a Mockingbird | 8/60 |
+| (typical niche book, e.g. *Dark Horse*) | 0/60 |
+
+Overall, **1,495 / 14,753 (~10%)** of corpus books have no ISBN at all in `bookId_to_isbn`. For these, `_cover_url` returns `''` and the layered HTML renders the dark placeholder. Other tabs (Recommend, Examples, Genres, Shelves) don't surface tight popular clusters as aggressively, so the symptom is most visible on Similar.
+
+**Performance issue:** Current path `streamlit_app.py:_cover_url` builds `https://covers.openlibrary.org/b/isbn/{isbn}-M.jpg?default=false`. Open Library is slow, rate-limited, and serves placeholder redirects on misses — covers take seconds to paint even on pages where every ISBN is valid.
+
+**Fix — single change addresses both:** `goodreads_books.json` contains an `image_url` field pointing at `images.gr-assets.com` (Amazon-fronted CDN). Verified May 2026:
+- URLs resolve as small (~3–7 KB) JPEGs at the `m` size — several× smaller than OL `-M` and well-matched to our ~100px display
+- 67.4% of corpus books have a real cover URL; 32.6% are the `nophoto` sentinel string (filter to `''` and fall back to OL/ISBN); 0 missing entirely
+- Covers ISBN-less popular books (Twilight, Gatsby) that OL currently can't serve
+
+Implementation (~20 min, no retrain):
+1. In `src/export.py`, stream `goodreads_books.json` once during export, build `bookId_to_image_url` dict (drop `nophoto` sentinels to `''`), add to the `feature_store` dict next to `bookId_to_isbn`. Adds ~1 MB to `feature_store.pt`.
+2. In `streamlit_app.py:_cover_url`, try `bookId_to_image_url` first; fall back to the OL/ISBN URL when empty; placeholder if both empty.
+3. Re-run `python main.py export`.
+
+Risk: `images.gr-assets.com` has no SLA for us; Goodreads/Amazon could deprecate it. Degradation is graceful — OL fallback still covers the ISBN'd books. Possible Plan B if hotlinking from Streamlit Cloud is blocked: rehost the ~10k JPEGs ourselves (~50 MB).
+
 ## Git Workflow
 
 Never commit and push in the same command. Always commit first, then ask before pushing.
