@@ -15,11 +15,20 @@ Usage:
     python main.py export <checkpoint_path>
 """
 import glob
+import json
 import os
+import re
 
 import numpy as np
 import pandas as pd
 import torch
+from tqdm import tqdm
+
+# Goodreads CDN serves three sizes via a single-letter suffix before the filename:
+# `s` (50px), `m` (98px), `l` (~180px). The `image_url` field defaults to `m`,
+# which is too small for retina displays at our ~100px render width — covers
+# look fuzzy. Rewrite to `l` for crisper rendering; files stay ~15–20 KB.
+_GR_SIZE_PATTERN = re.compile(r'(\d+)m(/\d+\.jpg)$')
 
 from src.dataset import load_features
 from src.evaluate import build_book_embeddings
@@ -88,6 +97,29 @@ def run_export(data_dir: str = 'data', checkpoint_path: str = None,
     books_df      = pd.read_parquet(os.path.join(data_dir, 'base_books.parquet'))
     bookId_to_author = dict(zip(books_df['book_id'].astype(str), books_df.get('primary_author', '')))
     bookId_to_isbn   = dict(zip(books_df['book_id'].astype(str), books_df.get('isbn', '')))
+
+    # Goodreads CDN cover URLs (images.gr-assets.com). Faster than Open Library
+    # and covers ISBN-less popular books (Twilight, Gatsby, etc). ~67% coverage;
+    # the `nophoto` sentinel is mapped to '' so callers can fall back to OL.
+    print("Loading image URLs from goodreads_books.json ...")
+    corpus_ids = set(fs.top_books)
+    bookId_to_image_url = {}
+    books_json_path = os.path.join(data_dir, 'goodreads_books.json')
+    with open(books_json_path) as f:
+        for line in tqdm(f, desc="  scanning books"):
+            b = json.loads(line)
+            bid = b.get('book_id', '')
+            if not bid or bid not in corpus_ids:
+                continue
+            url = (b.get('image_url') or '').strip()
+            if 'nophoto' in url:
+                url = ''
+            elif url:
+                url = _GR_SIZE_PATTERN.sub(r'\1l\2', url)
+            bookId_to_image_url[bid] = url
+    real_covers = sum(1 for u in bookId_to_image_url.values() if u)
+    print(f"  Image URLs: {real_covers:,}/{len(corpus_ids):,} corpus books have a cover "
+          f"({100*real_covers/max(len(corpus_ids),1):.1f}%)")
     books_sorted  = books_df.sort_values('ratings_count', ascending=False)
     top_set       = set(fs.top_books)
     popularity_ordered_titles = [
@@ -155,6 +187,7 @@ def run_export(data_dir: str = 'data', checkpoint_path: str = None,
         'bookId_to_genres': fs.bookId_to_genres,
         'bookId_to_author': bookId_to_author,
         'bookId_to_isbn':   bookId_to_isbn,
+        'bookId_to_image_url': bookId_to_image_url,
         # Context dicts stored as float32 arrays to reduce pickle overhead
         'bookId_to_genre_context': {
             bid: np.array(v, dtype=np.float32)

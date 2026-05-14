@@ -195,13 +195,13 @@ def _build_user_embedding(model, fs, liked_titles_with_weights, ts_inference):
 
 
 def _cover_url(bid, fs):
-    """Return Open Library cover URL for a book, or None if no ISBN."""
+    """Goodreads CDN first (faster, covers ISBN-less popular books), OL by ISBN as fallback."""
+    gr_url = fs.get('bookId_to_image_url', {}).get(bid, '')
+    if gr_url:
+        return gr_url
     isbn = fs.get('bookId_to_isbn', {}).get(bid, '')
     if not isbn:
         return ''
-    # -M (~180px) is plenty for our ~100px display and several× smaller than -L.
-    # default=false makes Open Library 404 instead of redirecting through a slow
-    # placeholder pipeline for missing covers.
     return f"https://covers.openlibrary.org/b/isbn/{isbn}-M.jpg?default=false"
 
 
